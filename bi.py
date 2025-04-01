@@ -12,23 +12,21 @@ import dash_cytoscape as cyto
 # ---------------------- Налаштування директорії та завантаження даних ---------------------- #
 DATA_DIR = "data"
 
-
 def load_data(filename):
     path = os.path.join(DATA_DIR, filename)
     return pd.read_csv(path)
 
-
-# Завантаження даних
+# Завантаження даних користувачів та транзакцій (донатів)
 users_df = load_data("user.csv")
 liqpay_orders_df = load_data("liqpay_order.csv")
 
-# Використовуємо поле create_date як дату реєстрації
+# Використовуємо поле create_date як дату реєстрації (оскільки поля birth_date немає)
 users_df["registration_date"] = pd.to_datetime(users_df["create_date"], errors="coerce")
 users_df["registration_duration"] = (datetime.today() - users_df["registration_date"]).dt.days
 
 liqpay_orders_df["create_date"] = pd.to_datetime(liqpay_orders_df["create_date"], errors="coerce")
 
-# Об’єднання даних донатів із даними користувачів
+# Об’єднання даних транзакцій із даними користувачів
 donations = liqpay_orders_df.merge(users_df[["id", "registration_duration", "user_role"]],
                                    left_on="user_id", right_on="id", how="left")
 donation_stats = donations.groupby("user_id", observed=False)["amount"].sum().reset_index().rename(
@@ -45,7 +43,7 @@ percent_donors = (unique_donors / len(users_df)) * 100
 max_donation = donation_stats["total_donations"].max()
 avg_reg_duration = donation_stats["registration_duration"].mean()
 
-# Встановлюємо цільові значення для KPI – порогові значення для прикладу
+# Цільові значення для KPI (пороги – приклад)
 kpi_targets = {
     "Загальна сума донатів": 1_000_000,
     "Середній донат": 200,
@@ -56,13 +54,11 @@ kpi_targets = {
     "Кореляція (реєстрація vs донати)": 0.3
 }
 
-
 def evaluate_kpi(actual, target, higher_better=True):
     if higher_better:
         return "Досягнуто" if actual >= target else "Не досягнуто"
     else:
         return "Досягнуто" if actual <= target else "Не досягнуто"
-
 
 kpi_info = [
     {"name": "Загальна сума донатів", "actual": total_donations, "target": kpi_targets["Загальна сума донатів"],
@@ -170,10 +166,8 @@ pivot_table_div = dash_table.DataTable(
     sort_action="native"
 )
 
-
-# ---------------- Створення інтерактивної "зіркової схеми" ---------------- #
+# ---------------- Створення інтерактивної "зіркової схеми" OLAP‑куба ---------------- #
 def create_star_schema_cytoscape():
-    # Факт та виміри
     fact = "Liqpay_order"
     dimensions = [
         "User", "Volunteer", "Military Personnel", "Request", "Levy",
@@ -181,7 +175,6 @@ def create_star_schema_cytoscape():
         "Email Template", "Email Notification", "Email Recipient", "Email Attachment", "AI Chat Messages"
     ]
     elements = []
-    # Додаємо вузол для факту
     elements.append({
         'data': {'id': 'fact', 'label': fact},
         'position': {'x': 600, 'y': 400},
@@ -203,9 +196,7 @@ def create_star_schema_cytoscape():
         })
     return elements
 
-
 cyto_elements = create_star_schema_cytoscape()
-
 
 # ---------------- Блок KPI ---------------- #
 def create_kpi_div(kpi_info):
@@ -223,7 +214,6 @@ def create_kpi_div(kpi_info):
                       "width": "30%", "backgroundColor": "#fff", "color": "#333"})
         )
     return html.Div(kpi_divs)
-
 
 kpi_div = create_kpi_div(kpi_info)
 
@@ -270,7 +260,7 @@ marks = {int(i): str(int(i)) for i in np.linspace(reg_duration_min, reg_duration
 app = dash.Dash(__name__, external_stylesheets=["https://codepen.io/chriddyp/pen/bWLwgP.css"])
 app.layout = html.Div(style=external_styles["body"], children=[
     html.H1("BI-аналітика Волонтер+", style={"textAlign": "center", "padding": "20px", "backgroundColor": "#fff",
-                                             "borderBottom": "2px solid #ddd"}),
+                                                 "borderBottom": "2px solid #ddd"}),
     dcc.Tabs([
         dcc.Tab(label="Основна аналітика", children=[
             html.Div(style={"padding": "10px", "border": "2px solid #ddd", "marginBottom": "20px",
@@ -333,11 +323,11 @@ app.layout = html.Div(style=external_styles["body"], children=[
                     kpi_div
                 ])
         ]),
-        dcc.Tab(label="Зіркова схема", children=[
+        dcc.Tab(label="Зіркова схема OLAP‑куба", children=[
             html.Div(
                 style={"padding": "20px", "border": "2px solid #ddd", "marginTop": "20px", "backgroundColor": "#fff"},
                 children=[
-                    html.H2("Інтерактивна зіркова схема даних"),
+                    html.H2("Інтерактивна зіркова схема даних (OLAP‑куб)"),
                     cyto.Cytoscape(
                         id='star-schema',
                         elements=cyto_elements,
@@ -375,12 +365,12 @@ app.layout = html.Div(style=external_styles["body"], children=[
                                 }
                             }
                         ]
-                    )
+                    ),
+                    html.Div(id="drill-down", style={"padding": "20px", "marginTop": "20px", "border": "2px solid #ddd", "backgroundColor": "#fff"})
                 ])
         ])
     ])
 ])
-
 
 # ---------------- Callbacks для оновлення графіків ---------------- #
 @app.callback(
@@ -396,7 +386,7 @@ def update_graphs(selected_roles, reg_duration_range):
         (donation_stats["user_role"].isin(selected_roles)) &
         (donation_stats["registration_duration"] >= reg_duration_range[0]) &
         (donation_stats["registration_duration"] <= reg_duration_range[1])
-        ]
+    ]
     updated_scatter = px.scatter(
         filtered_stats,
         x="registration_duration",
@@ -438,6 +428,31 @@ def update_graphs(selected_roles, reg_duration_range):
 
     return updated_scatter, updated_hist, updated_bar, updated_hist_reg
 
+# ---------------- Callback для drill‑down у зірковій схемі ---------------- #
+@app.callback(
+    Output("drill-down", "children"),
+    Input("star-schema", "tapNodeData")
+)
+def drill_down(nodeData):
+    if not nodeData:
+        return "Натисніть на вузол для перегляду деталей."
+    node_label = nodeData.get("label")
+    if node_label == "User":
+        fig = px.histogram(users_df, x="registration_duration", nbins=20, title="Деталізація: Тривалість реєстрації користувачів")
+        return dcc.Graph(figure=fig, style={"width": 1200, "height": 600})
+    elif node_label == "Request":
+        try:
+            requests_df = load_data("request.csv")
+            fig = px.histogram(requests_df, x="amount", nbins=30, title="Деталізація: Розподіл сум запитів")
+            return dcc.Graph(figure=fig, style={"width": 1200, "height": 600})
+        except Exception as e:
+            return f"Помилка завантаження даних запитів: {str(e)}"
+    elif node_label == "Liqpay_order":
+        orders_by_day = liqpay_orders_df.groupby(liqpay_orders_df["create_date"].dt.date)["amount"].sum().reset_index()
+        fig = px.line(orders_by_day, x="create_date", y="amount", title="Деталізація: Тренд транзакцій")
+        return dcc.Graph(figure=fig, style={"width": 1200, "height": 600})
+    else:
+        return f"Вибрано вимір: {node_label}. Детальна інформація не доступна."
 
 # ---------------- Запуск додатку ---------------- #
 if __name__ == '__main__':
