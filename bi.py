@@ -7,8 +7,9 @@ import plotly.graph_objects as go
 import dash
 from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output
+import dash_cytoscape as cyto
 
-# Директорія з CSV-файлами
+# ---------------------- Налаштування директорії та завантаження даних ---------------------- #
 DATA_DIR = "data"
 
 
@@ -17,32 +18,26 @@ def load_data(filename):
     return pd.read_csv(path)
 
 
-# Завантаження даних користувачів та транзакцій (донатів)
+# Завантаження даних
 users_df = load_data("user.csv")
 liqpay_orders_df = load_data("liqpay_order.csv")
 
-# Оскільки в user.csv немає поля "birth_date", використаємо "create_date" як дату реєстрації
+# Використовуємо поле create_date як дату реєстрації
 users_df["registration_date"] = pd.to_datetime(users_df["create_date"], errors="coerce")
-# Обчислюємо тривалість реєстрації (кількість днів від дати реєстрації до сьогодні)
 users_df["registration_duration"] = (datetime.today() - users_df["registration_date"]).dt.days
 
-# Перетворення дат у liqpay_order.csv
 liqpay_orders_df["create_date"] = pd.to_datetime(liqpay_orders_df["create_date"], errors="coerce")
 
 # Об’єднання даних донатів із даними користувачів
 donations = liqpay_orders_df.merge(users_df[["id", "registration_duration", "user_role"]],
                                    left_on="user_id", right_on="id", how="left")
-
-# Агрегування: сума донатів по кожному користувачу
-donation_stats = donations.groupby("user_id")["amount"].sum().reset_index().rename(
+donation_stats = donations.groupby("user_id", observed=False)["amount"].sum().reset_index().rename(
     columns={"amount": "total_donations"})
 donation_stats = donation_stats.merge(users_df[["id", "registration_duration", "user_role"]],
                                       left_on="user_id", right_on="id", how="left")
-
-# Обчислення кореляції між тривалістю реєстрації та сумою донатів
 corr_value = donation_stats["registration_duration"].corr(donation_stats["total_donations"])
 
-# ---------------- KPI Розрахунки ----------------
+# ---------------------- KPI Розрахунки ---------------------- #
 total_donations = donation_stats["total_donations"].sum()
 avg_donation = donation_stats["total_donations"].mean()
 unique_donors = liqpay_orders_df["user_id"].nunique()
@@ -50,7 +45,7 @@ percent_donors = (unique_donors / len(users_df)) * 100
 max_donation = donation_stats["total_donations"].max()
 avg_reg_duration = donation_stats["registration_duration"].mean()
 
-# Встановлюємо цільові значення для KPI (target) – за замовчуванням використовуємо деякі порогові значення
+# Встановлюємо цільові значення для KPI – порогові значення для прикладу
 kpi_targets = {
     "Загальна сума донатів": 1_000_000,
     "Середній донат": 200,
@@ -91,7 +86,7 @@ kpi_info = [
      "status": evaluate_kpi(corr_value, kpi_targets["Кореляція (реєстрація vs донати)"], higher_better=True)}
 ]
 
-# ---------------- Побудова графіків ----------------
+# ---------------- Побудова графіків ---------------- #
 fig_scatter = px.scatter(
     donation_stats,
     x="registration_duration",
@@ -112,7 +107,7 @@ fig_hist_donations = px.histogram(
 fig_hist_donations.update_layout(height=600, width=1200)
 
 fig_bar_roles = px.bar(
-    users_df.groupby("user_role").size().reset_index(name="кількість"),
+    users_df.groupby("user_role", observed=False).size().reset_index(name="кількість"),
     x="user_role",
     y="кількість",
     title="Кількість користувачів за ролями",
@@ -155,7 +150,7 @@ fig_hist_reg = px.histogram(
 )
 fig_hist_reg.update_layout(height=600, width=1200)
 
-# ---------------- Побудова пивот-таблиці ----------------
+# ---------------- Побудова пивот-таблиці ---------------- #
 donation_stats["reg_duration_bin"] = pd.cut(donation_stats["registration_duration"], bins=10)
 pivot_table = donation_stats.pivot_table(
     index="user_role",
@@ -176,56 +171,43 @@ pivot_table_div = dash_table.DataTable(
 )
 
 
-# ---------------- Побудова "зіркової схеми" ----------------
-def create_star_schema_diagram():
+# ---------------- Створення інтерактивної "зіркової схеми" ---------------- #
+def create_star_schema_cytoscape():
+    # Факт та виміри
     fact = "Liqpay_order"
-    dimensions = ["User", "Volunteer", "Military Personnel", "Request", "Levy",
-                  "Volunteer_Levy", "Report", "Attachment", "Brigade Codes", "Add Request",
-                  "Email Template", "Email Notification", "Email Recipient", "Email Attachment", "AI Chat Messages"]
-    n_dim = len(dimensions)
-    x_fact, y_fact = 0, 0
-    angles = np.linspace(0, 2 * np.pi, n_dim, endpoint=False)
-    x_dims = 4 * np.cos(angles)
-    y_dims = 4 * np.sin(angles)
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=[x_fact],
-        y=[y_fact],
-        mode="markers+text",
-        marker=dict(size=30, color="red"),
-        text=[fact],
-        textposition="middle center",
-        name="Факт"
-    ))
+    dimensions = [
+        "User", "Volunteer", "Military Personnel", "Request", "Levy",
+        "Volunteer_Levy", "Report", "Attachment", "Brigade Codes", "Add Request",
+        "Email Template", "Email Notification", "Email Recipient", "Email Attachment", "AI Chat Messages"
+    ]
+    elements = []
+    # Додаємо вузол для факту
+    elements.append({
+        'data': {'id': 'fact', 'label': fact},
+        'position': {'x': 600, 'y': 400},
+        'classes': 'fact'
+    })
+    n = len(dimensions)
+    radius = 400
+    angles = np.linspace(0, 2 * np.pi, n, endpoint=False)
     for i, dim in enumerate(dimensions):
-        fig.add_trace(go.Scatter(
-            x=[x_dims[i]],
-            y=[y_dims[i]],
-            mode="markers+text",
-            marker=dict(size=25, color="blue"),
-            text=[dim],
-            textposition="top center",
-            name="Вимір"
-        ))
-        fig.add_shape(
-            type="line",
-            x0=x_fact, y0=y_fact, x1=x_dims[i], y1=y_dims[i],
-            line=dict(color="gray", width=3)
-        )
-    fig.update_layout(
-        title="Зіркова схема даних",
-        xaxis=dict(showgrid=False, zeroline=False, visible=False),
-        yaxis=dict(showgrid=False, zeroline=False, visible=False),
-        height=800,
-        width=1200
-    )
-    return fig
+        x = 600 + radius * np.cos(angles[i])
+        y = 400 + radius * np.sin(angles[i])
+        elements.append({
+            'data': {'id': f'dim{i}', 'label': dim},
+            'position': {'x': x, 'y': y},
+            'classes': 'dimension'
+        })
+        elements.append({
+            'data': {'source': 'fact', 'target': f'dim{i}'}
+        })
+    return elements
 
 
-fig_star = create_star_schema_diagram()
+cyto_elements = create_star_schema_cytoscape()
 
 
-# ---------------- Побудова блоку KPI ----------------
+# ---------------- Блок KPI ---------------- #
 def create_kpi_div(kpi_info):
     kpi_divs = []
     for kpi in kpi_info:
@@ -237,99 +219,170 @@ def create_kpi_div(kpi_info):
                 html.P(f"Фактичне значення: {value_str}"),
                 html.P(f"Ціль: {target_str}"),
                 html.P(f"Статус: {kpi['status']}")
-            ], style={"border": "2px solid #ccc", "padding": "20px", "margin": "20px", "display": "inline-block",
-                      "width": "30%"})
+            ], style={"border": "2px solid #ddd", "padding": "20px", "margin": "20px", "display": "inline-block",
+                      "width": "30%", "backgroundColor": "#fff", "color": "#333"})
         )
     return html.Div(kpi_divs)
 
 
 kpi_div = create_kpi_div(kpi_info)
 
-# ---------------- Створення Dash‑додатку з вкладками ----------------
+# ---------------- Оформлення сторінки (CSS) ---------------- #
+external_styles = {
+    "body": {
+        "backgroundColor": "#f9f9f9",
+        "color": "#333",
+        "fontFamily": "Arial, sans-serif",
+        "margin": "0",
+        "padding": "0"
+    },
+    "header": {
+        "backgroundColor": "#fff",
+        "borderBottom": "2px solid #ddd",
+        "padding": "10px"
+    },
+    "card": {
+        "backgroundColor": "#fff",
+        "border": "1px solid #ddd",
+        "boxShadow": "0 2px 4px rgba(0, 0, 0, 0.05)",
+        "padding": "20px",
+        "margin": "20px"
+    },
+    "button": {
+        "backgroundColor": "#4CAF50",
+        "color": "#fff",
+        "border": "none",
+        "padding": "10px 20px",
+        "cursor": "pointer",
+        "transition": "background-color 0.3s"
+    },
+    "button_hover": {
+        "backgroundColor": "#45a049"
+    }
+}
+
+# ---------------- Створення Dash‑додатку з вкладками ---------------- #
 role_options = [{"label": role, "value": role} for role in sorted(users_df["user_role"].unique())]
 reg_duration_min = int(users_df["registration_duration"].min())
 reg_duration_max = int(users_df["registration_duration"].max())
 marks = {int(i): str(int(i)) for i in np.linspace(reg_duration_min, reg_duration_max, 10)}
 
-app = dash.Dash(__name__)
-
-app.layout = html.Div([
-    html.H1("BI-аналітика Волонтер+"),
+app = dash.Dash(__name__, external_stylesheets=["https://codepen.io/chriddyp/pen/bWLwgP.css"])
+app.layout = html.Div(style=external_styles["body"], children=[
+    html.H1("BI-аналітика Волонтер+", style={"textAlign": "center", "padding": "20px", "backgroundColor": "#fff",
+                                             "borderBottom": "2px solid #ddd"}),
     dcc.Tabs([
         dcc.Tab(label="Основна аналітика", children=[
-            html.Div([
-                html.Label("Фільтр за роллю користувача:"),
-                dcc.Dropdown(
-                    id="role-filter",
-                    options=role_options,
-                    value=[option["value"] for option in role_options],
-                    multi=True
-                ),
-                html.Label("Діапазон тривалості реєстрації (днів):"),
-                dcc.RangeSlider(
-                    id="reg-duration-slider",
-                    min=reg_duration_min,
-                    max=reg_duration_max,
-                    value=[reg_duration_min, reg_duration_max],
-                    marks=marks
-                )
-            ], style={"padding": "10px", "border": "2px solid #ccc", "margin-bottom": "20px"}),
-
-            html.Div([
+            html.Div(style={"padding": "10px", "border": "2px solid #ddd", "marginBottom": "20px",
+                            "backgroundColor": "#fff"},
+                     children=[
+                         html.Label("Фільтр за роллю користувача:"),
+                         dcc.Dropdown(
+                             id="role-filter",
+                             options=role_options,
+                             value=[option["value"] for option in role_options],
+                             multi=True
+                         ),
+                         html.Label("Діапазон тривалості реєстрації (днів):"),
+                         dcc.RangeSlider(
+                             id="reg-duration-slider",
+                             min=reg_duration_min,
+                             max=reg_duration_max,
+                             value=[reg_duration_min, reg_duration_max],
+                             marks=marks
+                         )
+                     ]),
+            html.Div(style={"marginBottom": "20px"}, children=[
                 html.H2("Графік: Сума донатів vs. Тривалість реєстрації"),
-                dcc.Graph(id="scatter-graph", figure=fig_scatter, style={"width": "1200px", "height": "600px"})
+                dcc.Graph(id="scatter-graph", figure=fig_scatter, style={"width": 1200, "height": 600})
             ]),
-
-            html.Div([
+            html.Div(style={"marginBottom": "20px"}, children=[
                 html.H2("Гістограма: Розподіл сум донатів"),
-                dcc.Graph(id="hist-donations", figure=fig_hist_donations, style={"width": "1200px", "height": "600px"})
+                dcc.Graph(id="hist-donations", figure=fig_hist_donations, style={"width": 1200, "height": 600})
             ]),
-
-            html.Div([
+            html.Div(style={"marginBottom": "20px"}, children=[
                 html.H2("Стовпчикова діаграма: Кількість користувачів за ролями"),
-                dcc.Graph(id="bar-roles", figure=fig_bar_roles, style={"width": "1200px", "height": "600px"})
+                dcc.Graph(id="bar-roles", figure=fig_bar_roles, style={"width": 1200, "height": 600})
             ]),
-
-            html.Div([
+            html.Div(style={"marginBottom": "20px"}, children=[
                 html.H2("Лінійний графік: Сукупна сума донатів по днях"),
-                dcc.Graph(id="line-orders", figure=fig_line, style={"width": "1200px", "height": "600px"})
+                dcc.Graph(id="line-orders", figure=fig_line, style={"width": 1200, "height": 600})
             ]),
-
-            html.Div([
+            html.Div(style={"marginBottom": "20px"}, children=[
                 html.H2("Кругова діаграма: Розподіл валют транзакцій"),
-                dcc.Graph(id="pie-currency", figure=fig_pie_currency, style={"width": "1200px", "height": "600px"})
+                dcc.Graph(id="pie-currency", figure=fig_pie_currency, style={"width": 1200, "height": 600})
             ]),
-
-            html.Div([
+            html.Div(style={"marginBottom": "20px"}, children=[
                 html.H2("Матриця кореляції для числових показників"),
-                dcc.Graph(id="heatmap", figure=fig_heatmap, style={"width": "1200px", "height": "600px"})
+                dcc.Graph(id="heatmap", figure=fig_heatmap, style={"width": 1200, "height": 600})
             ]),
-
-            html.Div([
+            html.Div(style={"marginBottom": "20px"}, children=[
                 html.H2("Гістограма: Розподіл тривалості реєстрації користувачів"),
-                dcc.Graph(id="hist-reg", figure=fig_hist_reg, style={"width": "1200px", "height": "600px"})
+                dcc.Graph(id="hist-reg", figure=fig_hist_reg, style={"width": 1200, "height": 600})
             ]),
-
-            html.Div([
-                html.H2("Пивот-таблиця: Сума донатів за ролями та інтервалами реєстрації"),
-                pivot_table_div
-            ], style={"padding": "20px", "border": "2px solid #ccc", "margin-top": "20px"}),
-
-            html.Div([
-                html.H2("Ключові показники (KPIs)"),
-                kpi_div
-            ], style={"padding": "20px", "border": "2px solid #ccc", "margin-top": "20px"})
+            html.Div(
+                style={"padding": "20px", "border": "2px solid #ddd", "marginTop": "20px", "backgroundColor": "#fff"},
+                children=[
+                    html.H2("Пивот-таблиця: Сума донатів за ролями та інтервалами реєстрації"),
+                    pivot_table_div
+                ]),
+            html.Div(
+                style={"padding": "20px", "border": "2px solid #ddd", "marginTop": "20px", "backgroundColor": "#fff"},
+                children=[
+                    html.H2("Ключові показники (KPIs)"),
+                    kpi_div
+                ])
         ]),
         dcc.Tab(label="Зіркова схема", children=[
-            html.Div([
-                html.H2("Зіркова схема даних"),
-                dcc.Graph(id="star-schema", figure=fig_star, style={"width": "1200px", "height": "800px"})
-            ], style={"padding": "20px", "border": "2px solid #ccc", "margin-top": "20px"})
+            html.Div(
+                style={"padding": "20px", "border": "2px solid #ddd", "marginTop": "20px", "backgroundColor": "#fff"},
+                children=[
+                    html.H2("Інтерактивна зіркова схема даних"),
+                    cyto.Cytoscape(
+                        id='star-schema',
+                        elements=cyto_elements,
+                        layout={'name': 'preset'},
+                        style={'width': 1200, 'height': 800},
+                        stylesheet=[
+                            {
+                                'selector': 'node',
+                                'style': {
+                                    'label': 'data(label)',
+                                    'text-valign': 'center',
+                                    'color': '#333',
+                                    'background-color': '#4CAF50',
+                                    'width': 50,
+                                    'height': 50,
+                                    'font-size': 12,
+                                    'border-width': 2,
+                                    'border-color': '#ddd'
+                                }
+                            },
+                            {
+                                'selector': 'node.fact',
+                                'style': {
+                                    'background-color': '#FF5722',
+                                    'width': 70,
+                                    'height': 70,
+                                    'font-size': 14
+                                }
+                            },
+                            {
+                                'selector': 'edge',
+                                'style': {
+                                    'line-color': '#ccc',
+                                    'width': 3
+                                }
+                            }
+                        ]
+                    )
+                ])
         ])
     ])
 ])
 
 
+# ---------------- Callbacks для оновлення графіків ---------------- #
 @app.callback(
     [Output("scatter-graph", "figure"),
      Output("hist-donations", "figure"),
@@ -344,7 +397,6 @@ def update_graphs(selected_roles, reg_duration_range):
         (donation_stats["registration_duration"] >= reg_duration_range[0]) &
         (donation_stats["registration_duration"] <= reg_duration_range[1])
         ]
-
     updated_scatter = px.scatter(
         filtered_stats,
         x="registration_duration",
@@ -366,7 +418,7 @@ def update_graphs(selected_roles, reg_duration_range):
 
     updated_bar = px.bar(
         users_df[users_df["user_role"].isin(selected_roles)]
-        .groupby("user_role").size().reset_index(name="кількість"),
+        .groupby("user_role", observed=False).size().reset_index(name="кількість"),
         x="user_role",
         y="кількість",
         title="Кількість користувачів за ролями",
@@ -387,5 +439,6 @@ def update_graphs(selected_roles, reg_duration_range):
     return updated_scatter, updated_hist, updated_bar, updated_hist_reg
 
 
+# ---------------- Запуск додатку ---------------- #
 if __name__ == '__main__':
     app.run(debug=True)
