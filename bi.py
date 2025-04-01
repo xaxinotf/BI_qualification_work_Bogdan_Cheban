@@ -8,6 +8,7 @@ import dash
 from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output
 import dash_cytoscape as cyto
+from sklearn.cluster import KMeans
 
 # ---------------------- Налаштування директорії та завантаження даних ---------------------- #
 DATA_DIR = "data"
@@ -16,17 +17,17 @@ def load_data(filename):
     path = os.path.join(DATA_DIR, filename)
     return pd.read_csv(path)
 
-# Завантаження даних користувачів та транзакцій (донатів)
+# Завантаження даних (user.csv та liqpay_order.csv)
 users_df = load_data("user.csv")
 liqpay_orders_df = load_data("liqpay_order.csv")
 
-# Використовуємо поле create_date як дату реєстрації (оскільки поля birth_date немає)
+# Використовуємо поле create_date як дату реєстрації (оскільки birth_date відсутня)
 users_df["registration_date"] = pd.to_datetime(users_df["create_date"], errors="coerce")
 users_df["registration_duration"] = (datetime.today() - users_df["registration_date"]).dt.days
 
 liqpay_orders_df["create_date"] = pd.to_datetime(liqpay_orders_df["create_date"], errors="coerce")
 
-# Об’єднання даних транзакцій із даними користувачів
+# Об’єднання транзакцій із даними користувачів
 donations = liqpay_orders_df.merge(users_df[["id", "registration_duration", "user_role"]],
                                    left_on="user_id", right_on="id", how="left")
 donation_stats = donations.groupby("user_id", observed=False)["amount"].sum().reset_index().rename(
@@ -43,7 +44,6 @@ percent_donors = (unique_donors / len(users_df)) * 100
 max_donation = donation_stats["total_donations"].max()
 avg_reg_duration = donation_stats["registration_duration"].mean()
 
-# Цільові значення для KPI (пороги – приклад)
 kpi_targets = {
     "Загальна сума донатів": 1_000_000,
     "Середній донат": 200,
@@ -82,7 +82,33 @@ kpi_info = [
      "status": evaluate_kpi(corr_value, kpi_targets["Кореляція (реєстрація vs донати)"], higher_better=True)}
 ]
 
-# ---------------- Побудова графіків ---------------- #
+# ---------------- Сегментація та кластеризація донорів (K‑Means) ---------------- #
+# Використовуємо два параметри: тривалість реєстрації та суму донатів
+X = donation_stats[["registration_duration", "total_donations"]].fillna(0)
+kmeans = KMeans(n_clusters=4, random_state=42)
+donation_stats["cluster"] = kmeans.fit_predict(X)
+
+# Побудова графіків для кластеризації
+fig_cluster_scatter = px.scatter(
+    donation_stats,
+    x="registration_duration",
+    y="total_donations",
+    color="cluster",
+    title="Сегментація донорів (K-Means)",
+    labels={"registration_duration": "Тривалість реєстрації (днів)", "total_donations": "Сума донатів", "cluster": "Кластер"}
+)
+fig_cluster_scatter.update_layout(height=600, width=1200)
+
+fig_cluster_box = px.box(
+    donation_stats,
+    x="cluster",
+    y="total_donations",
+    title="Розподіл сум донатів за кластерами",
+    labels={"cluster": "Кластер", "total_donations": "Сума донатів"}
+)
+fig_cluster_box.update_layout(height=600, width=1200)
+
+# ---------------- Побудова графіків OLAP та KPI ---------------- #
 fig_scatter = px.scatter(
     donation_stats,
     x="registration_duration",
@@ -368,11 +394,27 @@ app.layout = html.Div(style=external_styles["body"], children=[
                     ),
                     html.Div(id="drill-down", style={"padding": "20px", "marginTop": "20px", "border": "2px solid #ddd", "backgroundColor": "#fff"})
                 ])
+        ]),
+        dcc.Tab(label="Сегментація донорів", children=[
+            html.Div(style={"padding": "20px", "backgroundColor": "#fff", "border": "2px solid #ddd", "marginTop": "20px"}, children=[
+                html.H2("Сегментація та кластеризація донорів (K-Means)"),
+                html.Label("Виберіть кластер:"),
+                dcc.Dropdown(
+                    id="cluster-filter",
+                    options=[{"label": f"Кластер {i}", "value": int(i)} for i in sorted(donation_stats["cluster"].unique())],
+                    value=[int(i) for i in sorted(donation_stats["cluster"].unique())],
+                    multi=True
+                ),
+                html.Div([
+                    dcc.Graph(id="cluster-scatter", style={"width": 1200, "height": 600}),
+                    dcc.Graph(id="cluster-box", style={"width": 1200, "height": 600})
+                ])
+            ])
         ])
     ])
 ])
 
-# ---------------- Callbacks для оновлення графіків ---------------- #
+# ---------------- Callbacks для оновлення графіків OLAP ---------------- #
 @app.callback(
     [Output("scatter-graph", "figure"),
      Output("hist-donations", "figure"),
@@ -428,7 +470,7 @@ def update_graphs(selected_roles, reg_duration_range):
 
     return updated_scatter, updated_hist, updated_bar, updated_hist_reg
 
-# ---------------- Callback для drill‑down у зірковій схемі ---------------- #
+# ---------------- Callback для drill‑down у зірковій схемі OLAP‑куба ---------------- #
 @app.callback(
     Output("drill-down", "children"),
     Input("star-schema", "tapNodeData")
@@ -453,6 +495,36 @@ def drill_down(nodeData):
         return dcc.Graph(figure=fig, style={"width": 1200, "height": 600})
     else:
         return f"Вибрано вимір: {node_label}. Детальна інформація не доступна."
+
+# ---------------- Callback для кластеризації донорів ---------------- #
+@app.callback(
+    [Output("cluster-scatter", "figure"),
+     Output("cluster-box", "figure")],
+    Input("cluster-filter", "value")
+)
+def update_cluster_graphs(selected_clusters):
+    # Фільтруємо донорів за обраними кластерами
+    filtered_clusters = donation_stats[donation_stats["cluster"].isin(selected_clusters)]
+    fig_scatter_cluster = px.scatter(
+        filtered_clusters,
+        x="registration_duration",
+        y="total_donations",
+        color="cluster",
+        title="Сегментація донорів: Тривалість реєстрації vs Сума донатів",
+        labels={"registration_duration": "Тривалість реєстрації (днів)",
+                "total_donations": "Сума донатів", "cluster": "Кластер"}
+    )
+    fig_scatter_cluster.update_layout(height=600, width=1200)
+
+    fig_box_cluster = px.box(
+        filtered_clusters,
+        x="cluster",
+        y="total_donations",
+        title="Розподіл сум донатів за кластерами",
+        labels={"cluster": "Кластер", "total_donations": "Сума донатів"}
+    )
+    fig_box_cluster.update_layout(height=600, width=1200)
+    return fig_scatter_cluster, fig_box_cluster
 
 # ---------------- Запуск додатку ---------------- #
 if __name__ == '__main__':
