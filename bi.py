@@ -6,9 +6,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 import dash
 from dash import dcc, html, dash_table
-from dash.dependencies import Input, Output
+from dash.dependencies import Input, Output, State
 import dash_cytoscape as cyto
 from sklearn.cluster import KMeans
+from prophet import Prophet
+from prophet.plot import plot_plotly
 
 # ---------------------- Налаштування директорії та завантаження даних ---------------------- #
 DATA_DIR = "data"
@@ -17,11 +19,11 @@ def load_data(filename):
     path = os.path.join(DATA_DIR, filename)
     return pd.read_csv(path)
 
-# Завантаження даних (user.csv та liqpay_order.csv)
+# Завантаження даних
 users_df = load_data("user.csv")
 liqpay_orders_df = load_data("liqpay_order.csv")
 
-# Використовуємо поле create_date як дату реєстрації (оскільки birth_date відсутня)
+# Обробка дат: оскільки поля birth_date немає, використаємо create_date як дату реєстрації
 users_df["registration_date"] = pd.to_datetime(users_df["create_date"], errors="coerce")
 users_df["registration_duration"] = (datetime.today() - users_df["registration_date"]).dt.days
 
@@ -44,7 +46,8 @@ percent_donors = (unique_donors / len(users_df)) * 100
 max_donation = donation_stats["total_donations"].max()
 avg_reg_duration = donation_stats["registration_duration"].mean()
 
-kpi_targets = {
+# Порогові значення KPI (за замовчуванням)
+default_kpi_targets = {
     "Загальна сума донатів": 1_000_000,
     "Середній донат": 200,
     "Кількість унікальних донорів": 5000,
@@ -60,55 +63,38 @@ def evaluate_kpi(actual, target, higher_better=True):
     else:
         return "Досягнуто" if actual <= target else "Не досягнуто"
 
-kpi_info = [
-    {"name": "Загальна сума донатів", "actual": total_donations, "target": kpi_targets["Загальна сума донатів"],
-     "status": evaluate_kpi(total_donations, kpi_targets["Загальна сума донатів"], higher_better=True)},
-    {"name": "Середній донат", "actual": avg_donation, "target": kpi_targets["Середній донат"],
-     "status": evaluate_kpi(avg_donation, kpi_targets["Середній донат"], higher_better=True)},
-    {"name": "Кількість унікальних донорів", "actual": unique_donors,
-     "target": kpi_targets["Кількість унікальних донорів"],
-     "status": evaluate_kpi(unique_donors, kpi_targets["Кількість унікальних донорів"], higher_better=True)},
-    {"name": "Відсоток користувачів, що донатять", "actual": percent_donors,
-     "target": kpi_targets["Відсоток користувачів, що донатять"],
-     "status": evaluate_kpi(percent_donors, kpi_targets["Відсоток користувачів, що донатять"], higher_better=True)},
-    {"name": "Максимальний донат", "actual": max_donation, "target": kpi_targets["Максимальний донат"],
-     "status": evaluate_kpi(max_donation, kpi_targets["Максимальний донат"], higher_better=True)},
-    {"name": "Середня тривалість реєстрації (днів)", "actual": avg_reg_duration,
-     "target": kpi_targets["Середня тривалість реєстрації (днів)"],
-     "status": evaluate_kpi(avg_reg_duration, kpi_targets["Середня тривалість реєстрації (днів)"],
-                            higher_better=False)},
-    {"name": "Кореляція (реєстрація vs донати)", "actual": corr_value,
-     "target": kpi_targets["Кореляція (реєстрація vs донати)"],
-     "status": evaluate_kpi(corr_value, kpi_targets["Кореляція (реєстрація vs донати)"], higher_better=True)}
-]
+def calculate_kpi_info(targets):
+    kpi_info = [
+        {"name": "Загальна сума донатів", "actual": total_donations, "target": targets["Загальна сума донатів"],
+         "status": evaluate_kpi(total_donations, targets["Загальна сума донатів"], higher_better=True)},
+        {"name": "Середній донат", "actual": avg_donation, "target": targets["Середній донат"],
+         "status": evaluate_kpi(avg_donation, targets["Середній донат"], higher_better=True)},
+        {"name": "Кількість унікальних донорів", "actual": unique_donors,
+         "target": targets["Кількість унікальних донорів"],
+         "status": evaluate_kpi(unique_donors, targets["Кількість унікальних донорів"], higher_better=True)},
+        {"name": "Відсоток користувачів, що донатять", "actual": percent_donors,
+         "target": targets["Відсоток користувачів, що донатять"],
+         "status": evaluate_kpi(percent_donors, targets["Відсоток користувачів, що донатять"], higher_better=True)},
+        {"name": "Максимальний донат", "actual": max_donation, "target": targets["Максимальний донат"],
+         "status": evaluate_kpi(max_donation, targets["Максимальний донат"], higher_better=True)},
+        {"name": "Середня тривалість реєстрації (днів)", "actual": avg_reg_duration,
+         "target": targets["Середня тривалість реєстрації (днів)"],
+         "status": evaluate_kpi(avg_reg_duration, targets["Середня тривалість реєстрації (днів)"],
+                                higher_better=False)},
+        {"name": "Кореляція (реєстрація vs донати)", "actual": corr_value,
+         "target": targets["Кореляція (реєстрація vs донати)"],
+         "status": evaluate_kpi(corr_value, targets["Кореляція (реєстрація vs донати)"], higher_better=True)}
+    ]
+    return kpi_info
+
+kpi_info = calculate_kpi_info(default_kpi_targets)
 
 # ---------------- Сегментація та кластеризація донорів (K‑Means) ---------------- #
-# Використовуємо два параметри: тривалість реєстрації та суму донатів
 X = donation_stats[["registration_duration", "total_donations"]].fillna(0)
 kmeans = KMeans(n_clusters=4, random_state=42)
 donation_stats["cluster"] = kmeans.fit_predict(X)
 
-# Побудова графіків для кластеризації
-fig_cluster_scatter = px.scatter(
-    donation_stats,
-    x="registration_duration",
-    y="total_donations",
-    color="cluster",
-    title="Сегментація донорів (K-Means)",
-    labels={"registration_duration": "Тривалість реєстрації (днів)", "total_donations": "Сума донатів", "cluster": "Кластер"}
-)
-fig_cluster_scatter.update_layout(height=600, width=1200)
-
-fig_cluster_box = px.box(
-    donation_stats,
-    x="cluster",
-    y="total_donations",
-    title="Розподіл сум донатів за кластерами",
-    labels={"cluster": "Кластер", "total_donations": "Сума донатів"}
-)
-fig_cluster_box.update_layout(height=600, width=1200)
-
-# ---------------- Побудова графіків OLAP та KPI ---------------- #
+# ---------------- Побудова графіків ---------------- #
 fig_scatter = px.scatter(
     donation_stats,
     x="registration_duration",
@@ -192,7 +178,7 @@ pivot_table_div = dash_table.DataTable(
     sort_action="native"
 )
 
-# ---------------- Створення інтерактивної "зіркової схеми" OLAP‑куба ---------------- #
+# ---------------- Побудова інтерактивної "зіркової схеми" OLAP‑куба ---------------- #
 def create_star_schema_cytoscape():
     fact = "Liqpay_order"
     dimensions = [
@@ -243,6 +229,56 @@ def create_kpi_div(kpi_info):
 
 kpi_div = create_kpi_div(kpi_info)
 
+# ---------------- Прогнозування трендів із використанням Prophet ---------------- #
+ts_df = liqpay_orders_df.groupby(liqpay_orders_df["create_date"].dt.date)["amount"].sum().reset_index()
+ts_df.columns = ["ds", "y"]
+ts_df["ds"] = pd.to_datetime(ts_df["ds"])
+
+def forecast_donations(horizon_days):
+    model = Prophet(daily_seasonality=True)
+    model.fit(ts_df)
+    future = model.make_future_dataframe(periods=horizon_days)
+    forecast = model.predict(future)
+    fig_forecast = plot_plotly(model, forecast)
+    fig_forecast.update_layout(title=f"Прогноз сукупної суми донатів на наступні {horizon_days} днів",
+                               height=600, width=1200)
+    return fig_forecast
+
+# ---------------- Панель управління KPI (з можливістю коригування порогів) ---------------- #
+kpi_controls = html.Div([
+    html.H2("Налаштування порогів KPI"),
+    html.Div([
+        html.Label("Загальна сума донатів (ціль):"),
+        dcc.Input(id="target-total-donations", type="number", value=default_kpi_targets["Загальна сума донатів"])
+    ], style={"margin": "10px"}),
+    html.Div([
+        html.Label("Середній донат (ціль):"),
+        dcc.Input(id="target-avg-donation", type="number", value=default_kpi_targets["Середній донат"])
+    ], style={"margin": "10px"}),
+    html.Div([
+        html.Label("Кількість унікальних донорів (ціль):"),
+        dcc.Input(id="target-unique-donors", type="number", value=default_kpi_targets["Кількість унікальних донорів"])
+    ], style={"margin": "10px"}),
+    html.Div([
+        html.Label("Відсоток користувачів, що донатять (ціль):"),
+        dcc.Input(id="target-percent-donors", type="number", value=default_kpi_targets["Відсоток користувачів, що донатять"])
+    ], style={"margin": "10px"}),
+    html.Div([
+        html.Label("Максимальний донат (ціль):"),
+        dcc.Input(id="target-max-donation", type="number", value=default_kpi_targets["Максимальний донат"])
+    ], style={"margin": "10px"}),
+    html.Div([
+        html.Label("Середня тривалість реєстрації (днів, ціль):"),
+        dcc.Input(id="target-avg-reg-duration", type="number", value=default_kpi_targets["Середня тривалість реєстрації (днів)"])
+    ], style={"margin": "10px"}),
+    html.Div([
+        html.Label("Кореляція (ціль):"),
+        dcc.Input(id="target-corr", type="number", value=default_kpi_targets["Кореляція (реєстрація vs донати)"], step=0.01)
+    ], style={"margin": "10px"}),
+    html.Button("Оновити пороги KPI", id="update-kpi-btn", n_clicks=0, style={"backgroundColor": "#4CAF50", "color": "#fff", "padding": "10px 20px", "border": "none", "cursor": "pointer"}),
+    html.Div(id="kpi-notifications", style={"marginTop": "20px"})
+], style={"border": "2px solid #ddd", "padding": "20px", "margin": "20px", "backgroundColor": "#fff"})
+
 # ---------------- Оформлення сторінки (CSS) ---------------- #
 external_styles = {
     "body": {
@@ -283,7 +319,9 @@ reg_duration_min = int(users_df["registration_duration"].min())
 reg_duration_max = int(users_df["registration_duration"].max())
 marks = {int(i): str(int(i)) for i in np.linspace(reg_duration_min, reg_duration_max, 10)}
 
+# Оголошення додатку
 app = dash.Dash(__name__, external_stylesheets=["https://codepen.io/chriddyp/pen/bWLwgP.css"])
+
 app.layout = html.Div(style=external_styles["body"], children=[
     html.H1("BI-аналітика Волонтер+", style={"textAlign": "center", "padding": "20px", "backgroundColor": "#fff",
                                                  "borderBottom": "2px solid #ddd"}),
@@ -343,11 +381,13 @@ app.layout = html.Div(style=external_styles["body"], children=[
                     pivot_table_div
                 ]),
             html.Div(
+                id="kpi-div-updated",
                 style={"padding": "20px", "border": "2px solid #ddd", "marginTop": "20px", "backgroundColor": "#fff"},
                 children=[
                     html.H2("Ключові показники (KPIs)"),
                     kpi_div
-                ])
+                ]
+            )
         ]),
         dcc.Tab(label="Зіркова схема OLAP‑куба", children=[
             html.Div(
@@ -410,11 +450,31 @@ app.layout = html.Div(style=external_styles["body"], children=[
                     dcc.Graph(id="cluster-box", style={"width": 1200, "height": 600})
                 ])
             ])
+        ]),
+        dcc.Tab(label="Прогнозування трендів", children=[
+            html.Div(style={"padding": "20px", "backgroundColor": "#fff", "border": "2px solid #ddd", "marginTop": "20px"}, children=[
+                html.H2("Прогнозування сукупної суми донатів"),
+                html.Label("Виберіть горизонт прогнозування (днів):"),
+                dcc.Slider(
+                    id="forecast-horizon-slider",
+                    min=30,
+                    max=180,
+                    step=10,
+                    value=90,
+                    marks={i: str(i) for i in range(30, 181, 10)}
+                ),
+                html.Div(id="forecast-output", style={"marginTop": "20px"})
+            ])
+        ]),
+        dcc.Tab(label="Контроль KPI", children=[
+            html.Div(style={"padding": "20px", "backgroundColor": "#fff", "border": "2px solid #ddd", "marginTop": "20px"}, children=[
+                kpi_controls
+            ])
         ])
     ])
 ])
 
-# ---------------- Callbacks для оновлення графіків OLAP ---------------- #
+# ---------------- Callback для оновлення основних графіків ---------------- #
 @app.callback(
     [Output("scatter-graph", "figure"),
      Output("hist-donations", "figure"),
@@ -484,8 +544,8 @@ def drill_down(nodeData):
         return dcc.Graph(figure=fig, style={"width": 1200, "height": 600})
     elif node_label == "Request":
         try:
-            requests_df = load_data("request.csv")
-            fig = px.histogram(requests_df, x="amount", nbins=30, title="Деталізація: Розподіл сум запитів")
+            req_df = load_data("request.csv")
+            fig = px.histogram(req_df, x="amount", nbins=30, title="Деталізація: Розподіл сум запитів")
             return dcc.Graph(figure=fig, style={"width": 1200, "height": 600})
         except Exception as e:
             return f"Помилка завантаження даних запитів: {str(e)}"
@@ -503,7 +563,6 @@ def drill_down(nodeData):
     Input("cluster-filter", "value")
 )
 def update_cluster_graphs(selected_clusters):
-    # Фільтруємо донорів за обраними кластерами
     filtered_clusters = donation_stats[donation_stats["cluster"].isin(selected_clusters)]
     fig_scatter_cluster = px.scatter(
         filtered_clusters,
@@ -525,6 +584,59 @@ def update_cluster_graphs(selected_clusters):
     )
     fig_box_cluster.update_layout(height=600, width=1200)
     return fig_scatter_cluster, fig_box_cluster
+
+# ---------------- Callback для прогнозування трендів донатів ---------------- #
+@app.callback(
+    Output("forecast-output", "children"),
+    Input("forecast-horizon-slider", "value")
+)
+def update_forecast(horizon):
+    try:
+        model = Prophet(daily_seasonality=True)
+        model.fit(ts_df)
+        future = model.make_future_dataframe(periods=horizon)
+        forecast = model.predict(future)
+        fig_forecast = plot_plotly(model, forecast)
+        fig_forecast.update_layout(title=f"Прогноз сукупної суми донатів на наступні {horizon} днів",
+                                   height=600, width=1200)
+        return dcc.Graph(figure=fig_forecast, style={"width": 1200, "height": 600})
+    except Exception as e:
+        return html.P(f"Помилка прогнозування: {str(e)}", style={"color": "red"})
+
+# ---------------- Callback для оновлення KPI порогів ---------------- #
+@app.callback(
+    [Output("kpi-notifications", "children"),
+     Output("kpi-div-updated", "children")],
+    Input("update-kpi-btn", "n_clicks"),
+    [State("target-total-donations", "value"),
+     State("target-avg-donation", "value"),
+     State("target-unique-donors", "value"),
+     State("target-percent-donors", "value"),
+     State("target-max-donation", "value"),
+     State("target-avg-reg-duration", "value"),
+     State("target-corr", "value")]
+)
+def update_kpi_thresholds(n_clicks, total_target, avg_target, unique_target, percent_target, max_target, avg_reg_target, corr_target):
+    if n_clicks == 0:
+        return "", ""
+    new_targets = {
+        "Загальна сума донатів": total_target,
+        "Середній донат": avg_target,
+        "Кількість унікальних донорів": unique_target,
+        "Відсоток користувачів, що донатять": percent_target,
+        "Максимальний донат": max_target,
+        "Середня тривалість реєстрації (днів)": avg_reg_target,
+        "Кореляція (реєстрація vs донати)": corr_target
+    }
+    new_kpi_info = calculate_kpi_info(new_targets)
+    messages = []
+    for kpi in new_kpi_info:
+        if kpi["status"] == "Не досягнуто":
+            messages.append(html.P(f"Попередження! {kpi['name']} не досягнуто: фактичне значення {kpi['actual']:.2f} менше цільового {kpi['target']:.2f}.", style={"color": "red"}))
+    if not messages:
+        messages = html.P("Всі KPI відповідають цілям.", style={"color": "green"})
+    updated_kpi_div = create_kpi_div(new_kpi_info)
+    return messages, updated_kpi_div
 
 # ---------------- Запуск додатку ---------------- #
 if __name__ == '__main__':
