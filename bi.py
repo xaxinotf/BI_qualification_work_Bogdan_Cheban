@@ -23,37 +23,50 @@ def load_data(filename):
 users_df = load_data("user.csv")
 liqpay_orders_df = load_data("liqpay_order.csv")
 
-# Обробка дат. Оскільки "birth_date" відсутня, використовуємо "create_date" як дату реєстрації
+# ---------------------- Обробка даних ---------------------- #
+# Оскільки поля "birth_date" немає, використовуємо "create_date" як дату реєстрації
 users_df["registration_date"] = pd.to_datetime(users_df["create_date"], errors="coerce")
-users_df["registration_duration"] = (datetime.today() - users_df["registration_date"]).dt.days
+# Розраховуємо тривалість перебування на платформі (в днях) та перейменовуємо стовпець
+users_df["duration_on_platform"] = (datetime.today() - users_df["registration_date"]).dt.days
+
 liqpay_orders_df["create_date"] = pd.to_datetime(liqpay_orders_df["create_date"], errors="coerce")
 
 # Об’єднання транзакцій з даними користувачів
-donations = liqpay_orders_df.merge(users_df[["id", "registration_duration", "user_role"]],
+donations = liqpay_orders_df.merge(users_df[["id", "duration_on_platform", "user_role"]],
                                    left_on="user_id", right_on="id", how="left")
-donation_stats = donations.groupby("user_id", observed=False)["amount"].sum().reset_index().rename(
-    columns={"amount": "total_donations"})
-donation_stats = donation_stats.merge(users_df[["id", "registration_duration", "user_role"]],
-                                      left_on="user_id", right_on="id", how="left")
-corr_value = donation_stats["registration_duration"].corr(donation_stats["total_donations"])
+# Агрегація: сума донатів, кількість транзакцій та середній донат для кожного користувача
+donation_stats = donations.groupby("user_id", observed=False).agg(
+    total_donations=("amount", "sum"),
+    transaction_count=("amount", "count")
+).reset_index()
+donation_stats["avg_donation_user"] = donation_stats["total_donations"] / donation_stats["transaction_count"]
+donation_stats = donation_stats.merge(
+    users_df[["id", "duration_on_platform", "user_role"]],
+    left_on="user_id", right_on="id", how="left"
+)
+corr_value = donation_stats["duration_on_platform"].corr(donation_stats["total_donations"])
+
+# Розрахунок кореляційної матриці
+numeric_cols = donation_stats.select_dtypes(include=[np.number]).columns
+corr_matrix = donation_stats[numeric_cols].corr()
 
 # ---------------------- KPI Розрахунки ---------------------- #
 total_donations = donation_stats["total_donations"].sum()
-avg_donation = donation_stats["total_donations"].mean()
+avg_donation = donation_stats["total_donations"].mean()  # загальне середнє значення
 unique_donors = liqpay_orders_df["user_id"].nunique()
 percent_donors = (unique_donors / len(users_df)) * 100
 max_donation = donation_stats["total_donations"].max()
-avg_reg_duration = donation_stats["registration_duration"].mean()
+avg_duration_on_platform = donation_stats["duration_on_platform"].mean()
 
-# Порогові значення KPI (за замовчуванням)
+# Змінено ключі: використовується "перебування на платформі"
 default_kpi_targets = {
     "Загальна сума донатів": 1_000_000,
     "Середній донат": 200,
     "Кількість унікальних донорів": 5000,
     "Відсоток користувачів, що донатять": 10,
     "Максимальний донат": 100000,
-    "Середня тривалість реєстрації (днів)": 365,
-    "Кореляція (реєстрація vs донати)": 0.3
+    "Середня тривалість перебування на платформі (днів)": 365,
+    "Кореляція (перебування vs донати)": 0.3
 }
 
 def evaluate_kpi(actual, target, higher_better=True):
@@ -63,7 +76,7 @@ def evaluate_kpi(actual, target, higher_better=True):
         return "Досягнуто" if actual <= target else "Не досягнуто"
 
 def calculate_kpi_info(targets):
-    kpi_info = [
+    info = [
         {"name": "Загальна сума донатів", "actual": total_donations, "target": targets["Загальна сума донатів"],
          "status": evaluate_kpi(total_donations, targets["Загальна сума донатів"], higher_better=True)},
         {"name": "Середній донат", "actual": avg_donation, "target": targets["Середній донат"],
@@ -76,52 +89,76 @@ def calculate_kpi_info(targets):
          "status": evaluate_kpi(percent_donors, targets["Відсоток користувачів, що донатять"], higher_better=True)},
         {"name": "Максимальний донат", "actual": max_donation, "target": targets["Максимальний донат"],
          "status": evaluate_kpi(max_donation, targets["Максимальний донат"], higher_better=True)},
-        {"name": "Середня тривалість реєстрації (днів)", "actual": avg_reg_duration,
-         "target": targets["Середня тривалість реєстрації (днів)"],
-         "status": evaluate_kpi(avg_reg_duration, targets["Середня тривалість реєстрації (днів)"],
+        {"name": "Середня тривалість перебування на платформі (днів)", "actual": avg_duration_on_platform,
+         "target": targets["Середня тривалість перебування на платформі (днів)"],
+         "status": evaluate_kpi(avg_duration_on_platform, targets["Середня тривалість перебування на платформі (днів)"],
                                 higher_better=False)},
-        {"name": "Кореляція (реєстрація vs донати)", "actual": corr_value,
-         "target": targets["Кореляція (реєстрація vs донати)"],
-         "status": evaluate_kpi(corr_value, targets["Кореляція (реєстрація vs донати)"], higher_better=True)}
+        {"name": "Кореляція (перебування vs донати)", "actual": corr_value,
+         "target": targets["Кореляція (перебування vs донати)"],
+         "status": evaluate_kpi(corr_value, targets["Кореляція (перебування vs донати)"], higher_better=True)}
     ]
-    return kpi_info
+    return info
 
 kpi_info = calculate_kpi_info(default_kpi_targets)
 
 # ---------------- Сегментація та кластеризація донорів (K‑Means) ---------------- #
-X = donation_stats[["registration_duration", "total_donations"]].fillna(0)
+X = donation_stats[["duration_on_platform", "total_donations"]].fillna(0)
 kmeans = KMeans(n_clusters=4, random_state=42)
 donation_stats["cluster"] = kmeans.fit_predict(X)
 
 # ---------------- Побудова графіків ---------------- #
+
+# (3) Графік: Середній донат vs. Тривалість перебування на платформі
 fig_scatter = px.scatter(
     donation_stats,
-    x="registration_duration",
-    y="total_donations",
+    x="duration_on_platform",
+    y="avg_donation_user",
     color="user_role",
-    title="Залежність сум донатів від тривалості реєстрації (днів)",
-    labels={"registration_duration": "Тривалість реєстрації (днів)", "total_donations": "Сума донатів"}
+    title="Середній донат vs. Тривалість перебування на платформі",
+    labels={"duration_on_platform": "Тривалість перебування на платформі (днів)",
+            "avg_donation_user": "Середній донат"}
 )
 fig_scatter.update_layout(height=600, width=1200)
 
-fig_hist_donations = px.histogram(
-    donation_stats,
-    x="total_donations",
+# (4) Гістограма: Середній донат по місяцях
+liqpay_orders_df["month"] = liqpay_orders_df["create_date"].dt.to_period("M").dt.to_timestamp()
+monthly_avg = liqpay_orders_df.groupby("month")["amount"].mean().reset_index()
+fig_avg_donation_month = px.bar(
+    monthly_avg,
+    x="month",
+    y="amount",
+    title="Середній донат по місяцях",
+    labels={"month": "Місяць", "amount": "Середній донат"}
+)
+fig_avg_donation_month.update_layout(height=600, width=1200)
+
+# (1) Матриця кореляції для числових показників з перейменуванням осей і описом
+fig_heatmap = px.imshow(
+    corr_matrix,
+    text_auto=True,
+    title="Матриця кореляції числових показників (з описом)"
+)
+fig_heatmap.update_xaxes(title_text="Показники (X)")
+fig_heatmap.update_yaxes(title_text="Показники (Y)")
+fig_heatmap.add_annotation(
+    text="Ця матриця показує силу та напрямок зв'язків між числовими показниками.",
+    xref="paper", yref="paper",
+    x=0.5, y=-0.15, showarrow=False,
+    font=dict(size=12, color="#666")
+)
+fig_heatmap.update_layout(height=600, width=1200)
+
+# (2) Гістограма: Розподіл тривалості перебування на платформі (днів)
+fig_hist_reg = px.histogram(
+    users_df,
+    x="duration_on_platform",
     nbins=50,
-    title="Розподіл сум донатів користувачів",
-    labels={"total_donations": "Сума донатів"}
+    title="Розподіл тривалості перебування на платформі (днів)",
+    labels={"duration_on_platform": "Тривалість перебування на платформі (днів)"}
 )
-fig_hist_donations.update_layout(height=600, width=1200)
+fig_hist_reg.update_layout(height=600, width=1200)
 
-fig_bar_roles = px.bar(
-    users_df.groupby("user_role", observed=False).size().reset_index(name="кількість"),
-    x="user_role",
-    y="кількість",
-    title="Кількість користувачів за ролями",
-    labels={"user_role": "Роль", "кількість": "Кількість"}
-)
-fig_bar_roles.update_layout(height=600, width=1200)
-
+# Лінійний графік для транзакцій
 orders_by_day = liqpay_orders_df.groupby(liqpay_orders_df["create_date"].dt.date)["amount"].sum().reset_index()
 fig_line = px.line(
     orders_by_day,
@@ -132,52 +169,11 @@ fig_line = px.line(
 )
 fig_line.update_layout(height=600, width=1200)
 
-# Donut‑діаграма для валют транзакцій
-fig_donut = px.pie(
-    liqpay_orders_df,
-    names="currency_name",
-    title="Розподіл валют транзакцій (Donut‑діаграма)",
-    hole=0.4
-)
-fig_donut.update_layout(height=600, width=1200)
-
-# Waterfall‑діаграма для внеску кластерів
-cluster_contrib = donation_stats.groupby("cluster")["total_donations"].sum().reset_index()
-fig_waterfall = go.Figure(go.Waterfall(
-    name="Внесок кластерів",
-    orientation="v",
-    measure=["relative"] * len(cluster_contrib),
-    x=[f"Кластер {int(c)}" for c in cluster_contrib["cluster"]],
-    y=cluster_contrib["total_donations"],
-    textposition="outside",
-    text=cluster_contrib["total_donations"],
-    connector={"line": {"color": "rgb(63, 63, 63)"}}
-))
-fig_waterfall.update_layout(title="Waterfall‑діаграма: Внесок кластерів", height=600, width=1200)
-
-numeric_cols = donation_stats.select_dtypes(include=[np.number]).columns
-corr_matrix = donation_stats[numeric_cols].corr()
-fig_heatmap = px.imshow(
-    corr_matrix,
-    text_auto=True,
-    title="Матриця кореляції для числових показників"
-)
-fig_heatmap.update_layout(height=600, width=1200)
-
-fig_hist_reg = px.histogram(
-    users_df,
-    x="registration_duration",
-    nbins=50,
-    title="Розподіл тривалості реєстрації користувачів (днів)",
-    labels={"registration_duration": "Тривалість реєстрації (днів)"}
-)
-fig_hist_reg.update_layout(height=600, width=1200)
-
 # ---------------- Побудова пивот-таблиці ---------------- #
-donation_stats["reg_duration_bin"] = pd.cut(donation_stats["registration_duration"], bins=10)
+donation_stats["duration_bin"] = pd.cut(donation_stats["duration_on_platform"], bins=10)
 pivot_table = donation_stats.pivot_table(
     index="user_role",
-    columns="reg_duration_bin",
+    columns="duration_bin",
     values="total_donations",
     aggfunc="sum",
     fill_value=0
@@ -266,7 +262,7 @@ def forecast_donations(horizon_days):
     )
     return fig_forecast
 
-# ---------------- Панель управління KPI (з можливістю коригування порогів та сповіщень) ---------------- #
+# ---------------- Панель управління KPI (з можливістю коригування порогів та перегляду сповіщень) ---------------- #
 kpi_controls = html.Div([
     html.H2("Налаштування порогів KPI", style={"color": "#333"}),
     html.Div([
@@ -295,19 +291,18 @@ kpi_controls = html.Div([
                   style={"border": "1px solid #ddd", "padding": "5px"})
     ], style={"margin": "10px"}),
     html.Div([
-        html.Label("Середня тривалість реєстрації (днів, ціль):", style={"color": "#333"}),
-        dcc.Input(id="target-avg-reg-duration", type="number", value=default_kpi_targets["Середня тривалість реєстрації (днів)"],
+        html.Label("Середня тривалість перебування на платформі (днів, ціль):", style={"color": "#333"}),
+        dcc.Input(id="target-avg-reg-duration", type="number", value=default_kpi_targets["Середня тривалість перебування на платформі (днів)"],
                   style={"border": "1px solid #ddd", "padding": "5px"})
     ], style={"margin": "10px"}),
     html.Div([
         html.Label("Кореляція (ціль):", style={"color": "#333"}),
-        dcc.Input(id="target-corr", type="number", value=default_kpi_targets["Кореляція (реєстрація vs донати)"], step=0.01,
+        dcc.Input(id="target-corr", type="number", value=default_kpi_targets["Кореляція (перебування vs донати)"], step=0.01,
                   style={"border": "1px solid #ddd", "padding": "5px"})
     ], style={"margin": "10px"}),
     html.Button("Оновити пороги KPI", id="update-kpi-btn", n_clicks=0,
                 style={"backgroundColor": "#4CAF50", "color": "#fff", "padding": "10px 20px",
                        "border": "none", "cursor": "pointer", "margin": "10px"}),
-    # Видалено кнопку "Надіслати сповіщення"
     html.Div(id="kpi-notifications", style={"marginTop": "20px", "color": "#333"})
 ], style={"border": "2px solid #ddd", "padding": "20px", "margin": "20px", "backgroundColor": "#fff"})
 
@@ -375,8 +370,8 @@ fig_kpi_history.update_layout(height=600, width=1200)
 
 # ---------------- Створення додатку з вкладками ---------------- #
 role_options = [{"label": role, "value": role} for role in sorted(users_df["user_role"].unique())]
-reg_duration_min = int(users_df["registration_duration"].min())
-reg_duration_max = int(users_df["registration_duration"].max())
+reg_duration_min = int(users_df["duration_on_platform"].min())
+reg_duration_max = int(users_df["duration_on_platform"].max())
 marks = {int(i): str(int(i)) for i in np.linspace(reg_duration_min, reg_duration_max, 10)}
 
 app = dash.Dash(__name__, external_stylesheets=["https://codepen.io/chriddyp/pen/bWLwgP.css"])
@@ -396,7 +391,7 @@ app.layout = html.Div(style=app_css["container"], children=[
                              multi=True,
                              style={"border": "1px solid #ddd"}
                          ),
-                         html.Label("Діапазон тривалості реєстрації (днів):", style={"color": "#333"}),
+                         html.Label("Діапазон тривалості перебування на платформі (днів):", style={"color": "#333"}),
                          dcc.RangeSlider(
                              id="reg-duration-slider",
                              min=reg_duration_min,
@@ -406,35 +401,27 @@ app.layout = html.Div(style=app_css["container"], children=[
                          )
                      ]),
             html.Div(style={"marginBottom": "20px"}, children=[
-                html.H2("Графік: Сума донатів vs. Тривалість реєстрації", style={"color": "#333"}),
+                html.H2("Графік: Середній донат vs. Тривалість перебування на платформі", style={"color": "#333"}),
                 dcc.Graph(id="scatter-graph", figure=fig_scatter, style={"width": 1200, "height": 600})
             ]),
             html.Div(style={"marginBottom": "20px"}, children=[
-                html.H2("Гістограма: Розподіл сум донатів", style={"color": "#333"}),
-                dcc.Graph(id="hist-donations", figure=fig_hist_donations, style={"width": 1200, "height": 600})
-            ]),
-            html.Div(style={"marginBottom": "20px"}, children=[
-                html.H2("Стовпчикова діаграма: Кількість користувачів за ролями", style={"color": "#333"}),
-                dcc.Graph(id="bar-roles", figure=fig_bar_roles, style={"width": 1200, "height": 600})
+                html.H2("Гістограма: Середній донат по місяцях", style={"color": "#333"}),
+                dcc.Graph(id="hist-donations", figure=fig_avg_donation_month, style={"width": 1200, "height": 600})
             ]),
             html.Div(style={"marginBottom": "20px"}, children=[
                 html.H2("Лінійний графік: Сукупна сума донатів по днях", style={"color": "#333"}),
                 dcc.Graph(id="line-orders", figure=fig_line, style={"width": 1200, "height": 600})
             ]),
             html.Div(style={"marginBottom": "20px"}, children=[
-                html.H2("Donut‑діаграма: Розподіл валют транзакцій", style={"color": "#333"}),
-                dcc.Graph(id="pie-currency", figure=fig_donut, style={"width": 1200, "height": 600})
-            ]),
-            html.Div(style={"marginBottom": "20px"}, children=[
                 html.H2("Матриця кореляції для числових показників", style={"color": "#333"}),
                 dcc.Graph(id="heatmap", figure=fig_heatmap, style={"width": 1200, "height": 600})
             ]),
             html.Div(style={"marginBottom": "20px"}, children=[
-                html.H2("Гістограма: Розподіл тривалості реєстрації користувачів", style={"color": "#333"}),
+                html.H2("Гістограма: Розподіл тривалості перебування на платформі (днів)", style={"color": "#333"}),
                 dcc.Graph(id="hist-reg", figure=fig_hist_reg, style={"width": 1200, "height": 600})
             ]),
             html.Div(style=app_css["tab"], children=[
-                html.H2("Пивот-таблиця: Сума донатів за ролями та інтервалами реєстрації", style={"color": "#333"}),
+                html.H2("Пивот-таблиця: Сума донатів за ролями та інтервалами перебування на платформі", style={"color": "#333"}),
                 pivot_table_div
             ]),
             html.Div(style=app_css["tab"], id="kpi-div-updated", children=[
@@ -533,7 +520,6 @@ app.layout = html.Div(style=app_css["container"], children=[
 @app.callback(
     [Output("scatter-graph", "figure"),
      Output("hist-donations", "figure"),
-     Output("bar-roles", "figure"),
      Output("hist-reg", "figure")],
     [Input("role-filter", "value"),
      Input("reg-duration-slider", "value")]
@@ -541,49 +527,45 @@ app.layout = html.Div(style=app_css["container"], children=[
 def update_graphs(selected_roles, reg_duration_range):
     filtered_stats = donation_stats[
         (donation_stats["user_role"].isin(selected_roles)) &
-        (donation_stats["registration_duration"] >= reg_duration_range[0]) &
-        (donation_stats["registration_duration"] <= reg_duration_range[1])
+        (donation_stats["duration_on_platform"] >= reg_duration_range[0]) &
+        (donation_stats["duration_on_platform"] <= reg_duration_range[1])
     ]
+    # Середній донат vs. тривалість перебування
     updated_scatter = px.scatter(
         filtered_stats,
-        x="registration_duration",
-        y="total_donations",
+        x="duration_on_platform",
+        y="avg_donation_user",
         color="user_role",
-        title="Залежність сум донатів від тривалості реєстрації (днів)",
-        labels={"registration_duration": "Тривалість реєстрації (днів)", "total_donations": "Сума донатів"}
+        title="Середній донат vs. Тривалість перебування на платформі",
+        labels={"duration_on_platform": "Тривалість перебування на платформі (днів)",
+                "avg_donation_user": "Середній донат"}
     )
     updated_scatter.update_layout(height=600, width=1200)
 
-    updated_hist = px.histogram(
-        filtered_stats,
-        x="total_donations",
-        nbins=50,
-        title="Розподіл сум донатів користувачів",
-        labels={"total_donations": "Сума донатів"}
+    # Середній донат по місяцях
+    liqpay_orders_df["month"] = liqpay_orders_df["create_date"].dt.to_period("M").dt.to_timestamp()
+    monthly_avg = liqpay_orders_df.groupby("month")["amount"].mean().reset_index()
+    updated_hist = px.bar(
+        monthly_avg,
+        x="month",
+        y="amount",
+        title="Середній донат по місяцях",
+        labels={"month": "Місяць", "amount": "Середній донат"}
     )
     updated_hist.update_layout(height=600, width=1200)
 
-    updated_bar = px.bar(
-        users_df[users_df["user_role"].isin(selected_roles)]
-        .groupby("user_role", observed=False).size().reset_index(name="кількість"),
-        x="user_role",
-        y="кількість",
-        title="Кількість користувачів за ролями",
-        labels={"user_role": "Роль", "кількість": "Кількість"}
-    )
-    updated_bar.update_layout(height=600, width=1200)
-
+    # Гістограма: Розподіл тривалості перебування
     updated_hist_reg = px.histogram(
-        users_df[(users_df["registration_duration"] >= reg_duration_range[0]) &
-                 (users_df["registration_duration"] <= reg_duration_range[1])],
-        x="registration_duration",
+        users_df[(users_df["duration_on_platform"] >= reg_duration_range[0]) &
+                 (users_df["duration_on_platform"] <= reg_duration_range[1])],
+        x="duration_on_platform",
         nbins=50,
-        title="Розподіл тривалості реєстрації користувачів (днів)",
-        labels={"registration_duration": "Тривалість реєстрації (днів)"}
+        title="Розподіл тривалості перебування на платформі (днів)",
+        labels={"duration_on_platform": "Тривалість перебування на платформі (днів)"}
     )
     updated_hist_reg.update_layout(height=600, width=1200)
 
-    return updated_scatter, updated_hist, updated_bar, updated_hist_reg
+    return updated_scatter, updated_hist, updated_hist_reg
 
 # ---------------- Callback для drill‑down у зірковій схемі OLAP‑куба ---------------- #
 @app.callback(
@@ -595,7 +577,7 @@ def drill_down(nodeData):
         return "Натисніть на вузол для перегляду деталей."
     node_label = nodeData.get("label")
     if node_label == "User":
-        fig = px.histogram(users_df, x="registration_duration", nbins=20, title="Деталізація: Тривалість реєстрації користувачів")
+        fig = px.histogram(users_df, x="duration_on_platform", nbins=20, title="Деталізація: Тривалість перебування на платформі")
         return dcc.Graph(figure=fig, style={"width": 1200, "height": 600})
     elif node_label == "Request":
         try:
@@ -621,11 +603,11 @@ def update_cluster_graphs(selected_clusters):
     filtered_clusters = donation_stats[donation_stats["cluster"].isin(selected_clusters)]
     fig_scatter_cluster = px.scatter(
         filtered_clusters,
-        x="registration_duration",
+        x="duration_on_platform",
         y="total_donations",
         color="cluster",
-        title="Сегментація донорів: Тривалість реєстрації vs Сума донатів",
-        labels={"registration_duration": "Тривалість реєстрації (днів)",
+        title="Сегментація донорів: Тривалість перебування на платформі vs Сума донатів",
+        labels={"duration_on_platform": "Тривалість перебування на платформі (днів)",
                 "total_donations": "Сума донатів", "cluster": "Кластер"}
     )
     fig_scatter_cluster.update_layout(height=600, width=1200)
@@ -680,8 +662,8 @@ def update_kpi_thresholds(n_clicks, total_target, avg_target, unique_target, per
         "Кількість унікальних донорів": unique_target,
         "Відсоток користувачів, що донатять": percent_target,
         "Максимальний донат": max_target,
-        "Середня тривалість реєстрації (днів)": avg_reg_target,
-        "Кореляція (реєстрація vs донати)": corr_target
+        "Середня тривалість перебування на платформі (днів)": avg_reg_target,
+        "Кореляція (перебування vs донати)": corr_target
     }
     new_kpi_info = calculate_kpi_info(new_targets)
     messages = []
