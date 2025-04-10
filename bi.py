@@ -19,14 +19,13 @@ def load_data(filename):
     path = os.path.join(DATA_DIR, filename)
     return pd.read_csv(path)
 
-# Завантаження даних із CSV
+# Завантаження даних із CSV для користувачів та транзакцій (донатів)
 users_df = load_data("user.csv")
 liqpay_orders_df = load_data("liqpay_order.csv")
 
-# ---------------------- Обробка даних ---------------------- #
-# Оскільки поля "birth_date" немає, використовуємо "create_date" як дату реєстрації
+# ---------------------- Обробка даних для користувачів та донатів ---------------------- #
+# Використовуємо "create_date" як дату реєстрації та розраховуємо тривалість перебування на платформі
 users_df["registration_date"] = pd.to_datetime(users_df["create_date"], errors="coerce")
-# Розраховуємо тривалість перебування на платформі (в днях) та перейменовуємо стовпець
 users_df["duration_on_platform"] = (datetime.today() - users_df["registration_date"]).dt.days
 
 liqpay_orders_df["create_date"] = pd.to_datetime(liqpay_orders_df["create_date"], errors="coerce")
@@ -46,19 +45,18 @@ donation_stats = donation_stats.merge(
 )
 corr_value = donation_stats["duration_on_platform"].corr(donation_stats["total_donations"])
 
-# Розрахунок кореляційної матриці
+# Кореляційна матриця
 numeric_cols = donation_stats.select_dtypes(include=[np.number]).columns
 corr_matrix = donation_stats[numeric_cols].corr()
 
 # ---------------------- KPI Розрахунки ---------------------- #
 total_donations = donation_stats["total_donations"].sum()
-avg_donation = donation_stats["total_donations"].mean()  # загальне середнє значення
+avg_donation = donation_stats["total_donations"].mean()
 unique_donors = liqpay_orders_df["user_id"].nunique()
 percent_donors = (unique_donors / len(users_df)) * 100
 max_donation = donation_stats["total_donations"].max()
 avg_duration_on_platform = donation_stats["duration_on_platform"].mean()
 
-# Змінено ключі: використовується "перебування на платформі"
 default_kpi_targets = {
     "Загальна сума донатів": 1_000_000,
     "Середній донат": 200,
@@ -141,7 +139,7 @@ fig_heatmap = px.imshow(
 fig_heatmap.update_xaxes(title_text="Показники (X)")
 fig_heatmap.update_yaxes(title_text="Показники (Y)")
 fig_heatmap.add_annotation(
-    text="Ця матриця показує силу та напрямок зв'язків між числовими показниками.",
+    text="Ця матриця демонструє силу та напрямок зв'язків між числовими показниками.",
     xref="paper", yref="paper",
     x=0.5, y=-0.15, showarrow=False,
     font=dict(size=12, color="#666")
@@ -190,6 +188,35 @@ pivot_table_div = dash_table.DataTable(
     style_cell={'textAlign': 'center', 'padding': '5px'},
     style_header={'backgroundColor': '#ddd', 'fontWeight': 'bold'}
 )
+
+# ---------------- Аналіз запитів за бригадами ---------------- #
+# Завантаження таблиць з запитами, військовослужбовцями та бригадами
+requests_df = load_data("request.csv")
+military_personnel_df = load_data("military_personnel.csv")
+brigade_df = load_data("brigade.csv")
+# Щоб уникнути плутанини з однаковими назвами ідентифікаторів, перейменовуємо ідентифікатори
+military_personnel_df = military_personnel_df.rename(columns={"id": "mp_id"})
+brigade_df = brigade_df.rename(columns={"id": "brigade_id"})
+
+# Об’єднання даних: спершу requests з military_personnel, а потім з brigade
+requests_merged = requests_df.merge(military_personnel_df, left_on="military_personnel_id", right_on="mp_id", how="left")
+requests_merged = requests_merged.merge(brigade_df, left_on="brigade_id", right_on="brigade_id", how="left")
+# Групуємо запити за назвою бригади та обчислюємо суму, середнє значення та кількість запитів
+grouped_requests = requests_merged.groupby("name").agg(
+    total_requests=("id", "count"),
+    total_amount=("amount", "sum"),
+    average_amount=("amount", "mean")
+).reset_index()
+
+# ---------------- Побудова графіку аналізу запитів ---------------- #
+fig_requests_by_brigade = px.bar(
+    grouped_requests,
+    x="name",
+    y="total_amount",
+    title="Аналіз запитів: Загальна сума запитів за бригадами",
+    labels={"name": "Бригада", "total_amount": "Загальна сума запитів"}
+)
+fig_requests_by_brigade.update_layout(height=600, width=1200)
 
 # ---------------- Побудова інтерактивної "зіркової схеми" OLAP‑куба ---------------- #
 def create_star_schema_cytoscape():
@@ -262,7 +289,7 @@ def forecast_donations(horizon_days):
     )
     return fig_forecast
 
-# ---------------- Панель управління KPI (з можливістю коригування порогів та перегляду сповіщень) ---------------- #
+# ---------------- Панель управління KPI (коригування порогів) ---------------- #
 kpi_controls = html.Div([
     html.H2("Налаштування порогів KPI", style={"color": "#333"}),
     html.Div([
@@ -367,6 +394,33 @@ fig_kpi_history = px.line(kpi_history, x="Дата", y="Сукупна сума 
                           title="Історія KPI: Сукупна сума донатів за останні 30 днів",
                           labels={"Сукупна сума донатів": "Сума донатів", "Дата": "Дата"})
 fig_kpi_history.update_layout(height=600, width=1200)
+
+# ---------------- Аналіз запитів за бригадами ---------------- #
+# Завантаження даних для запитів, військовослужбовців та бригад
+requests_df = load_data("request.csv")
+military_personnel_df = load_data("military_personnel.csv")
+brigade_df = load_data("brigade.csv")
+# Перейменовуємо id для унікальності
+military_personnel_df = military_personnel_df.rename(columns={"id": "mp_id"})
+brigade_df = brigade_df.rename(columns={"id": "brigade_id"})
+# Об’єднання даних: з'єднуємо requests з військовослужбовцями та потім з бригадами
+requests_merged = requests_df.merge(military_personnel_df, left_on="military_personnel_id", right_on="mp_id", how="left")
+requests_merged = requests_merged.merge(brigade_df, left_on="brigade_id", right_on="brigade_id", how="left")
+# Групуємо запити за назвою бригади
+grouped_requests = requests_merged.groupby("name").agg(
+    total_requests=("id", "count"),
+    total_amount=("amount", "sum"),
+    average_amount=("amount", "mean")
+).reset_index()
+
+fig_requests_by_brigade = px.bar(
+    grouped_requests,
+    x="name",
+    y="total_amount",
+    title="Аналіз запитів: Загальна сума запитів за бригадами",
+    labels={"name": "Бригада", "total_amount": "Загальна сума запитів"}
+)
+fig_requests_by_brigade.update_layout(height=600, width=1200)
 
 # ---------------- Створення додатку з вкладками ---------------- #
 role_options = [{"label": role, "value": role} for role in sorted(users_df["user_role"].unique())]
@@ -512,6 +566,25 @@ app.layout = html.Div(style=app_css["container"], children=[
                     dcc.Graph(id="kpi-history", figure=fig_kpi_history, style={"width": 1200, "height": 600})
                 ])
             ])
+        ]),
+        # ---------------- Нова вкладка: Аналіз запитів за бригадами ---------------- #
+        dcc.Tab(label="Аналіз запитів", children=[
+            html.Div(style=app_css["tab"], children=[
+                html.H2("Аналіз запитів за бригадами", style={"color": "#333"}),
+                dcc.Graph(id="requests-analysis-graph", figure=fig_requests_by_brigade, style={"width": 1200, "height": 600}),
+                # Додатковий dropdown для вибору метрики (опційно)
+                html.Label("Оберіть метрику:", style={"color": "#333", "marginTop": "20px"}),
+                dcc.Dropdown(
+                    id="request-metric-dropdown",
+                    options=[
+                        {"label": "Кількість запитів", "value": "total_requests"},
+                        {"label": "Загальна сума запитів", "value": "total_amount"},
+                        {"label": "Середня сума запиту", "value": "average_amount"}
+                    ],
+                    value="total_amount",
+                    style={"border": "1px solid #ddd"}
+                )
+            ])
         ])
     ])
 ])
@@ -530,7 +603,6 @@ def update_graphs(selected_roles, reg_duration_range):
         (donation_stats["duration_on_platform"] >= reg_duration_range[0]) &
         (donation_stats["duration_on_platform"] <= reg_duration_range[1])
     ]
-    # Середній донат vs. тривалість перебування
     updated_scatter = px.scatter(
         filtered_stats,
         x="duration_on_platform",
@@ -542,7 +614,6 @@ def update_graphs(selected_roles, reg_duration_range):
     )
     updated_scatter.update_layout(height=600, width=1200)
 
-    # Середній донат по місяцях
     liqpay_orders_df["month"] = liqpay_orders_df["create_date"].dt.to_period("M").dt.to_timestamp()
     monthly_avg = liqpay_orders_df.groupby("month")["amount"].mean().reset_index()
     updated_hist = px.bar(
@@ -554,7 +625,6 @@ def update_graphs(selected_roles, reg_duration_range):
     )
     updated_hist.update_layout(height=600, width=1200)
 
-    # Гістограма: Розподіл тривалості перебування
     updated_hist_reg = px.histogram(
         users_df[(users_df["duration_on_platform"] >= reg_duration_range[0]) &
                  (users_df["duration_on_platform"] <= reg_duration_range[1])],
@@ -677,6 +747,34 @@ def update_kpi_thresholds(n_clicks, total_target, avg_target, unique_target, per
         messages = html.P("Всі KPI відповідають встановленим цілям.", style={"color": "green"})
     updated_kpi_div = create_kpi_div(new_kpi_info)
     return messages, updated_kpi_div
+
+# ---------------- Callback для оновлення аналізу запитів за бригадами ---------------- #
+@app.callback(
+    Output("requests-analysis-graph", "figure"),
+    Input("request-metric-dropdown", "value")
+)
+def update_requests_analysis(metric):
+    # Оскільки grouped_requests вже обчислено, вибираємо потрібну метрику
+    # Перевірка: якщо даних немає, повертаємо порожню фігуру
+    if grouped_requests.empty:
+        return go.Figure()
+    # Для зручності, якщо метрика "total_requests" - змінюємо назву осі Y
+    y_label = ""
+    if metric == "total_requests":
+        y_label = "Кількість запитів"
+    elif metric == "total_amount":
+        y_label = "Загальна сума запитів"
+    elif metric == "average_amount":
+        y_label = "Середня сума запиту"
+    fig = px.bar(
+        grouped_requests,
+        x="name",
+        y=metric,
+        title=f"Аналіз запитів: {y_label} за бригадами",
+        labels={"name": "Бригада", metric: y_label}
+    )
+    fig.update_layout(height=600, width=1200)
+    return fig
 
 # ---------------- Запуск додатку ---------------- #
 if __name__ == '__main__':
