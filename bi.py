@@ -412,7 +412,7 @@ fig_vol_scatter, fig_vol_topwords = vol_analysis_instance.create_plots(
     }
 )
 
-# ---------------------- Побудова додатку з боковою панеллю ---------------------- #
+# ---------------------- Побудова додатку з боковою панеллю+ ---------------------- #
 app = dash.Dash(__name__, suppress_callback_exceptions=True, external_stylesheets=["https://codepen.io/chriddyp/pen/bWLwgP.css"])
 app.layout = html.Div(style=app_css["container"], children=[
     html.Div(style=app_css["sidebar"], children=[
