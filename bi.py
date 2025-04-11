@@ -201,19 +201,24 @@ fig_requests_by_brigade = px.bar(
 )
 fig_requests_by_brigade.update_layout(height=600, width=1200)
 
+# ---------------------- Аналіз товарів (з додатковою фільтрацією за темою) ---------------------- #
+# Якщо в requests_df немає колонки "product", витягуємо її з колонки description за допомогою regex
 if "product" not in requests_df.columns:
     def extract_product(desc):
         m = re.search(r"'([^']+)'", desc)
         return m.group(1) if m else "Невідомо"
     requests_df["product"] = requests_df["description"].apply(extract_product)
-def get_product_aggregation():
-    product_group = requests_df.groupby("product").agg(
+
+def get_product_aggregation(df):
+    product_group = df.groupby("product").agg(
         request_count=("id", "count"),
         total_amount=("amount", "sum"),
         average_amount=("amount", "mean")
     ).reset_index()
     return product_group
-product_group = get_product_aggregation()
+
+# Попередній розрахунок агрегованих даних за товарами
+product_group = get_product_aggregation(requests_df)
 fig_products = px.bar(
     product_group,
     x="product",
@@ -396,7 +401,7 @@ fig_kpi_history.update_layout(height=600, width=1200)
 # ---------------------- Інтеграція аналізу волонтерської діяльності ---------------------- #
 from analyze1 import VolunteerAnalysis
 vol_analysis_instance = VolunteerAnalysis(data_dir="data")
-# Обчислюємо аналіз та отримуємо конфігуровані графіки
+# Отримуємо конфігуровані графіки для аналізу волонтерів
 fig_vol_scatter, fig_vol_topwords = vol_analysis_instance.create_plots(
     cluster_chart_config={
         "width": 1300,
@@ -408,11 +413,10 @@ fig_vol_scatter, fig_vol_topwords = vol_analysis_instance.create_plots(
         "width": 1300,
         "height": 700,
         "title": "Альтернативний тематичний аналіз: Топ-10 ключових слів"
-        # 'orientation' видаляється в методі create_plots, тому його не використовуйте тут
     }
 )
 
-# ---------------------- Побудова додатку з боковою панеллю+ ---------------------- #
+# ---------------------- Побудова додатку з боковою панеллю ---------------------- #
 app = dash.Dash(__name__, suppress_callback_exceptions=True, external_stylesheets=["https://codepen.io/chriddyp/pen/bWLwgP.css"])
 app.layout = html.Div(style=app_css["container"], children=[
     html.Div(style=app_css["sidebar"], children=[
@@ -563,58 +567,40 @@ def render_tab_content(tab_value):
             )
         ])
     elif tab_value == "tab-products":
-        def extract_product(desc):
-            m = re.search(r"'([^']+)'", desc)
-            return m.group(1) if m else "Невідомо"
-        if "product" not in requests_df.columns:
-            requests_df["product"] = requests_df["description"].apply(extract_product)
-        product_group = requests_df.groupby("product").agg(
-            request_count=("id", "count"),
-            total_amount=("amount", "sum"),
-            average_amount=("amount", "mean")
-        ).reset_index()
-        fig_products = px.bar(
-            product_group,
-            x="product",
-            y="request_count",
-            title="Кількість заявок за товарами",
-            labels={"product": "Товар", "request_count": "Кількість заявок"}
-        )
-        fig_products.update_layout(height=600, width=1200)
-        product_table = dash_table.DataTable(
-            id="product-table",
-            columns=[{"name": col, "id": col, "editable": True} for col in product_group.columns],
-            data=product_group.to_dict("records"),
-            filter_action="native",
-            sort_action="native",
-            page_size=15,
-            export_format="csv",
-            style_table={'overflowX': 'auto'},
-            style_cell={'textAlign': 'center', 'padding': '5px', 'minWidth': '80px'},
-            style_header={'backgroundColor': '#ddd', 'fontWeight': 'bold'},
-            style_data_conditional=[{"if": {"row_index": "odd"}, "backgroundColor": "#f3f3f3"}]
-        )
+        # Додаємо текстове поле для фільтрації за темою запиту
         return html.Div([
             html.H2("Аналіз заявок за товарами", style={"color": "#333"}),
-            dcc.Graph(id="product-bar-chart", figure=fig_products),
-            html.Label("Оберіть метрику:", style={"color": "#333", "marginTop": "20px"}),
-            dcc.Dropdown(
-                id="product-metric-dropdown",
-                options=[
-                    {"label": "Кількість заявок", "value": "request_count"},
-                    {"label": "Сума заявок", "value": "total_amount"},
-                    {"label": "Середня сума заявки", "value": "average_amount"}
-                ],
-                value="request_count",
-                style={"border": "1px solid #ddd", "width": "50%"}
-            ),
-            html.H2("Таблиця аналізу товарів", style={"color": "#333", "marginTop": "20px"}),
+            html.Div([
+                html.Label("Фільтр за темою запиту:", style={"color": "#333"}),
+                dcc.Input(
+                    id="product-topic-filter",
+                    type="text",
+                    placeholder="Введіть тему запиту (наприклад, машини, тактична медицина)",
+                    style={"width": "100%", "padding": "5px", "border": "1px solid #ddd"}
+                )
+            ], style={"margin": "10px"}),
+            html.Div([
+                dcc.Graph(id="product-bar-chart", figure=fig_products)
+            ]),
+            html.Div([
+                html.Label("Оберіть метрику:", style={"color": "#333", "marginTop": "20px"}),
+                dcc.Dropdown(
+                    id="product-metric-dropdown",
+                    options=[
+                        {"label": "Кількість заявок", "value": "request_count"},
+                        {"label": "Загальна сума заявок", "value": "total_amount"},
+                        {"label": "Середня сума заявки", "value": "average_amount"}
+                    ],
+                    value="request_count",
+                    style={"border": "1px solid #ddd", "width": "50%"}
+                )
+            ], style={"margin": "10px"}),
+            html.H2("Таблиця аналізу заявок за товарами", style={"color": "#333", "marginTop": "20px"}),
             product_table
         ], style=app_css["tab"])
     elif tab_value == "tab-volunteers":
         from analyze1 import VolunteerAnalysis
         va = VolunteerAnalysis(data_dir="data")
-        # Отримуємо конфігуровані графіки для аналізу волонтерської діяльності
         fig_vol_scatter, fig_vol_topwords = va.create_plots(
             cluster_chart_config={
                 "width": 1300,
@@ -814,10 +800,14 @@ def update_requests_analysis(metric):
 
 @app.callback(
     Output("product-bar-chart", "figure"),
-    Input("product-metric-dropdown", "value")
+    [Input("product-metric-dropdown", "value"),
+     Input("product-topic-filter", "value")]
 )
-def update_product_chart(metric):
+def update_product_chart(metric, topic_filter):
     df = requests_df.copy()
+    # Фільтрація за темою запиту, якщо введено ключове слово
+    if topic_filter and topic_filter.strip() != "":
+        df = df[df["description"].str.contains(topic_filter, case=False, na=False)]
     product_group = df.groupby("product").agg(
         request_count=("id", "count"),
         total_amount=("amount", "sum"),
