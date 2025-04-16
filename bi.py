@@ -6,12 +6,19 @@ from prophet import Prophet
 from prophet.plot import plot_plotly
 from sklearn.cluster import KMeans
 
-# Спроба використання Dask для роботи з великими наборами даних (якщо встановлено)
+# Спроба імпорту Dask та PySpark для роботи з великими наборами даних
 try:
     import dask.dataframe as dd
     USE_DASK = True
 except ImportError:
     USE_DASK = False
+
+try:
+    from pyspark.sql import SparkSession
+    USE_SPARK = True
+    spark = SparkSession.builder.appName("BI_Application").getOrCreate()
+except ImportError:
+    USE_SPARK = False
 
 # Використання Dash Bootstrap Components для сучасного оформлення
 import dash
@@ -20,12 +27,17 @@ from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output, State
 import dash_cytoscape as cyto
 
-# ---------------------- Налаштування директорії та завантаження даних ---------------------- #
+# ====================================================================
+# Функція для завантаження даних (підтримує Dask та PySpark)
+# ====================================================================
 DATA_DIR = "data"
 
 def load_data(filename):
     path = os.path.join(DATA_DIR, filename)
-    if USE_DASK:
+    if USE_SPARK:
+        df = spark.read.option("header", True).csv(path)
+        return df.toPandas()
+    elif USE_DASK:
         return dd.read_csv(path).compute()
     else:
         return pd.read_csv(path)
@@ -35,7 +47,7 @@ users_df = load_data("user.csv")
 liqpay_orders_df = load_data("liqpay_order.csv")
 requests_df = load_data("request.csv")
 
-# ---------------------- Обробка даних ---------------------- #
+# ---------------------- Попередня обробка даних ---------------------- #
 users_df["registration_date"] = pd.to_datetime(users_df["create_date"], errors="coerce")
 users_df["duration_on_platform"] = (datetime.today() - users_df["registration_date"]).dt.days
 liqpay_orders_df["create_date"] = pd.to_datetime(liqpay_orders_df["create_date"], errors="coerce")
@@ -57,7 +69,7 @@ corr_value = donation_stats["duration_on_platform"].corr(donation_stats["total_d
 numeric_cols = donation_stats.select_dtypes(include=[np.number]).columns
 corr_matrix = donation_stats[numeric_cols].corr()
 
-# ---------------------- KPI Розрахунки ---------------------- #
+# ---------------------- KPI розрахунки ---------------------- #
 total_donations = donation_stats["total_donations"].sum()
 avg_donation = donation_stats["total_donations"].mean()
 unique_donors = liqpay_orders_df["user_id"].nunique()
@@ -79,7 +91,7 @@ def evaluate_kpi(actual, target, higher_better=True):
     return "Досягнуто" if (actual >= target if higher_better else actual <= target) else "Не досягнуто"
 
 def calculate_kpi_info(targets):
-    info = [
+    return [
         {"name": "Загальна сума внесків", "actual": total_donations, "target": targets["Загальна сума донатів"],
          "status": evaluate_kpi(total_donations, targets["Загальна сума донатів"], higher_better=True)},
         {"name": "Середній внесок", "actual": avg_donation, "target": targets["Середній донат"],
@@ -100,7 +112,6 @@ def calculate_kpi_info(targets):
          "target": targets["Кореляція (перебування vs донати)"],
          "status": evaluate_kpi(corr_value, targets["Кореляція (перебування vs донати)"], higher_better=True)}
     ]
-    return info
 
 kpi_info = calculate_kpi_info(default_kpi_targets)
 
@@ -109,7 +120,7 @@ X = donation_stats[["duration_on_platform", "total_donations"]].fillna(0)
 kmeans = KMeans(n_clusters=4, random_state=42)
 donation_stats["cluster"] = kmeans.fit_predict(X)
 
-# ---------------------- Конфігуровувальні налаштування діаграм ---------------------- #
+# ---------------------- Конфігурація діаграм ---------------------- #
 chart_config_default = {"height": 600, "width": 1200}
 heatmap_config = {"height": 600, "width": 1200, "title": "Кореляційна матриця числових показників"}
 hist_reg_config = {"height": 600, "width": 1200, "title": "Розподіл часу перебування на платформі (дні)"}
@@ -129,7 +140,6 @@ fig_heatmap.add_annotation(
     xref="paper", yref="paper", x=0.5, y=-0.15, showarrow=False,
     font=dict(size=12, color="#666")
 )
-
 fig_hist_reg = px.histogram(users_df, x="duration_on_platform", nbins=50, **hist_reg_config)
 fig_scatter = px.scatter(donation_stats, x="duration_on_platform", y="avg_donation_user",
                          color="user_role", **scatter_config)
@@ -182,12 +192,11 @@ if "product" not in requests_df.columns:
     requests_df["product"] = requests_df["description"].apply(extract_product)
 
 def get_product_aggregation(df):
-    product_group = df.groupby("product").agg(
+    return df.groupby("product").agg(
         request_count=("id", "count"),
         total_amount=("amount", "sum"),
         average_amount=("amount", "mean")
     ).reset_index()
-    return product_group
 
 product_group = get_product_aggregation(requests_df)
 fig_products = px.bar(product_group, x="product", y="request_count",
@@ -216,12 +225,11 @@ def create_star_schema_cytoscape():
         "Volunteer_Levy", "Report", "Attachment", "Brigade Codes", "Add Request",
         "Email Template", "Email Notification", "Email Recipient", "Email Attachment", "AI Chat Messages"
     ]
-    elements = []
-    elements.append({
+    elements = [{
         'data': {'id': 'fact', 'label': fact},
         'position': {'x': 600, 'y': 400},
         'classes': 'fact'
-    })
+    }]
     n = len(dimensions)
     radius = 400
     angles = np.linspace(0, 2 * np.pi, n, endpoint=False)
@@ -246,26 +254,24 @@ def create_kpi_div(kpi_info):
     for kpi in kpi_info:
         value_str = f"{kpi['actual']:.2f}" if isinstance(kpi["actual"], (float, int)) else f"{kpi['actual']}"
         target_str = f"{kpi['target']:.2f}" if isinstance(kpi["target"], (float, int)) else f"{kpi['target']}"
-        kpi_divs.append(
-            html.Div([
-                html.H3(kpi["name"], style={"color": "#333", "textAlign": "center"}),
-                html.P(f"Факт: {value_str}", style={"color": "#555", "textAlign": "center"}),
-                html.P(f"Ціль: {target_str}", style={"color": "#4CAF50", "textAlign": "center"}),
-                html.P(f"Статус: {kpi['status']}", style={"color": "#666", "textAlign": "center"})
-            ], style={
-                "border": "2px solid #ddd", "padding": "20px", "margin": "10px",
-                "backgroundColor": "#fff", "width": "calc(33% - 20px)", "display": "inline-block",
-                "boxShadow": "0 2px 4px rgba(0, 0, 0, 0.05)"
-            })
-        )
+        kpi_divs.append(html.Div([
+            html.H3(kpi["name"], style={"color": "#333", "textAlign": "center"}),
+            html.P(f"Факт: {value_str}", style={"color": "#555", "textAlign": "center"}),
+            html.P(f"Ціль: {target_str}", style={"color": "#4CAF50", "textAlign": "center"}),
+            html.P(f"Статус: {kpi['status']}", style={"color": "#666", "textAlign": "center"})
+        ], style={
+            "border": "2px solid #ddd", "padding": "20px", "margin": "10px",
+            "backgroundColor": "#fff", "width": "calc(33% - 20px)", "display": "inline-block",
+            "boxShadow": "0 2px 4px rgba(0, 0, 0, 0.05)"
+        }))
     return html.Div(kpi_divs, style={"display": "flex", "flexWrap": "wrap", "justifyContent": "space-around"})
 
 kpi_div = create_kpi_div(kpi_info)
 
+# ---------------------- Прогнозування з Prophet ---------------------- #
 ts_df = liqpay_orders_df.groupby(liqpay_orders_df["create_date"].dt.date)["amount"].sum().reset_index()
 ts_df.columns = ["ds", "y"]
 ts_df["ds"] = pd.to_datetime(ts_df["ds"])
-
 def forecast_donations(horizon_days):
     model = Prophet(daily_seasonality=True)
     model.fit(ts_df)
@@ -279,46 +285,38 @@ kpi_controls = html.Div([
     html.H2("Налаштування KPI", style={"color": "#333", "textAlign": "center"}),
     html.Div([
         html.Label("Загальна сума внесків (ціль):", style={"color": "#333"}),
-        dcc.Input(id="target-total-donations", type="number",
-                  value=default_kpi_targets["Загальна сума донатів"],
+        dcc.Input(id="target-total-donations", type="number", value=default_kpi_targets["Загальна сума донатів"],
                   style={"border": "1px solid #ddd", "padding": "5px", "width": "100%"})
     ], style={"margin": "10px"}),
     html.Div([
         html.Label("Середній внесок (ціль):", style={"color": "#333"}),
-        dcc.Input(id="target-avg-donation", type="number",
-                  value=default_kpi_targets["Середній донат"],
+        dcc.Input(id="target-avg-donation", type="number", value=default_kpi_targets["Середній донат"],
                   style={"border": "1px solid #ddd", "padding": "5px", "width": "100%"})
     ], style={"margin": "10px"}),
     html.Div([
         html.Label("Кількість унікальних донорів (ціль):", style={"color": "#333"}),
-        dcc.Input(id="target-unique-donors", type="number",
-                  value=default_kpi_targets["Кількість унікальних донорів"],
+        dcc.Input(id="target-unique-donors", type="number", value=default_kpi_targets["Кількість унікальних донорів"],
                   style={"border": "1px solid #ddd", "padding": "5px", "width": "100%"})
     ], style={"margin": "10px"}),
     html.Div([
         html.Label("Відсоток користувачів, що вносять (ціль):", style={"color": "#333"}),
-        dcc.Input(id="target-percent-donors", type="number",
-                  value=default_kpi_targets["Відсоток користувачів, що донатять"],
+        dcc.Input(id="target-percent-donors", type="number", value=default_kpi_targets["Відсоток користувачів, що донатять"],
                   style={"border": "1px solid #ddd", "padding": "5px", "width": "100%"})
     ], style={"margin": "10px"}),
     html.Div([
         html.Label("Максимальний внесок (ціль):", style={"color": "#333"}),
-        dcc.Input(id="target-max-donations", type="number",
-                  value=default_kpi_targets["Максимальний донат"],
+        dcc.Input(id="target-max-donations", type="number", value=default_kpi_targets["Максимальний донат"],
                   style={"border": "1px solid #ddd", "padding": "5px", "width": "100%"})
     ], style={"margin": "10px"}),
     html.Div([
         html.Label("Середня тривалість перебування на платформі (днів):", style={"color": "#333"}),
-        dcc.Input(id="target-avg-reg-duration", type="number",
-                  value=default_kpi_targets["Середня тривалість перебування на платформі (днів)"],
+        dcc.Input(id="target-avg-reg-duration", type="number", value=default_kpi_targets["Середня тривалість перебування на платформі (днів)"],
                   style={"border": "1px solid #ddd", "padding": "5px", "width": "100%"})
     ], style={"margin": "10px"}),
     html.Div([
         html.Label("Кореляція (ціль):", style={"color": "#333"}),
-        dcc.Input(id="target-corr", type="number",
-                  value=default_kpi_targets["Кореляція (перебування vs донати)"],
-                  step=0.01,
-                  style={"border": "1px solid #ddd", "padding": "5px", "width": "100%"})
+        dcc.Input(id="target-corr", type="number", value=default_kpi_targets["Кореляція (перебування vs донати)"],
+                  step=0.01, style={"border": "1px solid #ddd", "padding": "5px", "width": "100%"})
     ], style={"margin": "10px"}),
     html.Button("Оновити KPI", id="update-kpi-btn", n_clicks=0,
                 style={"backgroundColor": "#4CAF50", "color": "#fff", "padding": "10px 20px",
@@ -326,7 +324,7 @@ kpi_controls = html.Div([
     html.Div(id="kpi-notifications", style={"marginTop": "20px", "color": "#333", "textAlign": "center"})
 ], style={"border": "2px solid #ddd", "padding": "20px", "margin": "20px", "backgroundColor": "#fff"})
 
-# ---------------------- Додаткове оформлення через Bootstrap ---------------------- #
+# ---------------------- Оформлення через Bootstrap ---------------------- #
 external_styles = {
     "body": {"backgroundColor": "#f9f9f9", "color": "#333", "fontFamily": "Arial, sans-serif", "margin": "0", "padding": "0"},
     "sidebar": {"backgroundColor": "#fff", "padding": "20px", "borderRight": "2px solid #ddd", "height": "100vh", "overflowY": "auto"},
