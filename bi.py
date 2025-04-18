@@ -1,12 +1,17 @@
-import os, re, numpy as np, pandas as pd
+# bi.py
+
+import os
+import re
+import numpy as np
+import pandas as pd
 from datetime import datetime, timedelta
+
 import plotly.express as px
 import plotly.graph_objects as go
 from prophet import Prophet
 from prophet.plot import plot_plotly
 from sklearn.cluster import KMeans
 
-# Спроба імпорту Dask/PySpark для роботи з великими даними
 try:
     import dask.dataframe as dd
     USE_DASK = True
@@ -20,12 +25,14 @@ try:
 except ImportError:
     USE_SPARK = False
 
-# Використання Dash, Dash Bootstrap Components та інших модулів
 import dash
 import dash_bootstrap_components as dbc
 from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output, State
 import dash_cytoscape as cyto
+
+# імпорт модуля для Retention Cohorts
+from retention_cohorts import get_cohort_controls, make_cohort_figure, make_cohort_size_figure
 
 # ==================================================================
 # Функція завантаження даних (підтримка Dask та PySpark)
@@ -35,23 +42,25 @@ DATA_DIR = "data"
 def load_data(filename):
     path = os.path.join(DATA_DIR, filename)
     if USE_SPARK:
-        df = spark.read.option("header", True).csv(path)
-        return df.toPandas()
+        return spark.read.option("header", True).csv(path).toPandas()
     elif USE_DASK:
         return dd.read_csv(path).compute()
     else:
         return pd.read_csv(path)
 
-# ---------------------- Завантаження основних даних ----------------------
+# ---------------------- Завантаження даних ----------------------
 users_df = load_data("user.csv")
 liqpay_orders_df = load_data("liqpay_order.csv")
 requests_df = load_data("request.csv")
+military_personnel_df = load_data("military_personnel.csv")
+brigade_df = load_data("brigade.csv")
 
-# ---------------------- Обробка даних ----------------------
+# ---------------------- Підготовка та обробка ----------------------
 users_df["registration_date"] = pd.to_datetime(users_df["create_date"], errors="coerce")
 users_df["duration_on_platform"] = (datetime.today() - users_df["registration_date"]).dt.days
 liqpay_orders_df["create_date"] = pd.to_datetime(liqpay_orders_df["create_date"], errors="coerce")
 
+# Злиття для донатної статистики
 donations = liqpay_orders_df.merge(
     users_df[["id", "duration_on_platform", "user_role"]],
     left_on="user_id", right_on="id", how="left"
@@ -65,6 +74,7 @@ donation_stats = donation_stats.merge(
     users_df[["id", "duration_on_platform", "user_role"]],
     left_on="user_id", right_on="id", how="left"
 )
+# Кореляційні розрахунки
 corr_value = donation_stats["duration_on_platform"].corr(donation_stats["total_donations"])
 numeric_cols = donation_stats.select_dtypes(include=[np.number]).columns
 corr_matrix = donation_stats[numeric_cols].corr()
@@ -73,7 +83,7 @@ corr_matrix = donation_stats[numeric_cols].corr()
 total_donations = donation_stats["total_donations"].sum()
 avg_donation = donation_stats["total_donations"].mean()
 unique_donors = liqpay_orders_df["user_id"].nunique()
-percent_donors = (unique_donors / len(users_df)) * 100
+percent_donors = unique_donors / len(users_df) * 100
 max_donation = donation_stats["total_donations"].max()
 avg_duration_on_platform = donation_stats["duration_on_platform"].mean()
 
@@ -82,7 +92,7 @@ default_kpi_targets = {
     "Середній донат": 200,
     "Кількість унікальних донорів": 5000,
     "Відсоток користувачів, що донатять": 10,
-    "Максимальний донат": 100000,
+    "Максимальний донат": 100_000,
     "Середня тривалість перебування на платформі (днів)": 365,
     "Кореляція (перебування vs донати)": 0.3
 }
@@ -92,25 +102,48 @@ def evaluate_kpi(actual, target, higher_better=True):
 
 def calculate_kpi_info(targets):
     return [
-        {"name": "Загальна сума внесків", "actual": total_donations, "target": targets["Загальна сума донатів"],
-         "status": evaluate_kpi(total_donations, targets["Загальна сума донатів"], higher_better=True)},
-        {"name": "Середній внесок", "actual": avg_donation, "target": targets["Середній донат"],
-         "status": evaluate_kpi(avg_donation, targets["Середній донат"], higher_better=True)},
-        {"name": "Кількість унікальних донорів", "actual": unique_donors,
-         "target": targets["Кількість унікальних донорів"],
-         "status": evaluate_kpi(unique_donors, targets["Кількість унікальних донорів"], higher_better=True)},
-        {"name": "Відсоток користувачів, що вносять", "actual": percent_donors,
-         "target": targets["Відсоток користувачів, що донатять"],
-         "status": evaluate_kpi(percent_donors, targets["Відсоток користувачів, що донатять"], higher_better=True)},
-        {"name": "Максимальний внесок", "actual": max_donation, "target": targets["Максимальний донат"],
-         "status": evaluate_kpi(max_donation, targets["Максимальний донат"], higher_better=True)},
-        {"name": "Середня тривалість перебування (днів)", "actual": avg_duration_on_platform,
-         "target": targets["Середня тривалість перебування на платформі (днів)"],
-         "status": evaluate_kpi(avg_duration_on_platform, targets["Середня тривалість перебування на платформі (днів)"],
-                                higher_better=False)},
-        {"name": "Кореляція (перебування vs внески)", "actual": corr_value,
-         "target": targets["Кореляція (перебування vs донати)"],
-         "status": evaluate_kpi(corr_value, targets["Кореляція (перебування vs донати)"], higher_better=True)}
+        {
+            "name": "Загальна сума внесків",
+            "actual": total_donations,
+            "target": targets["Загальна сума донатів"],
+            "status": evaluate_kpi(total_donations, targets["Загальна сума донатів"], True)
+        },
+        {
+            "name": "Середній внесок",
+            "actual": avg_donation,
+            "target": targets["Середній донат"],
+            "status": evaluate_kpi(avg_donation, targets["Середній донат"], True)
+        },
+        {
+            "name": "Кількість унікальних донорів",
+            "actual": unique_donors,
+            "target": targets["Кількість унікальних донорів"],
+            "status": evaluate_kpi(unique_donors, targets["Кількість унікальних донорів"], True)
+        },
+        {
+            "name": "Відсоток користувачів, що вносять",
+            "actual": percent_donors,
+            "target": targets["Відсоток користувачів, що донатять"],
+            "status": evaluate_kpi(percent_donors, targets["Відсоток користувачів, що донатять"], True)
+        },
+        {
+            "name": "Максимальний внесок",
+            "actual": max_donation,
+            "target": targets["Максимальний донат"],
+            "status": evaluate_kpi(max_donation, targets["Максимальний донат"], True)
+        },
+        {
+            "name": "Середня тривалість перебування (днів)",
+            "actual": avg_duration_on_platform,
+            "target": targets["Середня тривалість перебування на платформі (днів)"],
+            "status": evaluate_kpi(avg_duration_on_platform, targets["Середня тривалість перебування на платформі (днів)"], False)
+        },
+        {
+            "name": "Кореляція (перебування vs внески)",
+            "actual": corr_value,
+            "target": targets["Кореляція (перебування vs донати)"],
+            "status": evaluate_kpi(corr_value, targets["Кореляція (перебування vs донати)"], True)
+        }
     ]
 
 kpi_info = calculate_kpi_info(default_kpi_targets)
@@ -120,18 +153,20 @@ X = donation_stats[["duration_on_platform", "total_donations"]].fillna(0)
 kmeans = KMeans(n_clusters=4, random_state=42)
 donation_stats["cluster"] = kmeans.fit_predict(X)
 
-# ---------------------- Конфігурація діаграм (конструктори) ----------------------
+# ---------------------- Конфігурація діаграм ----------------------
 chart_config_default = {"height": 600, "width": 1200}
 heatmap_config = {"height": 600, "width": 1200, "title": "Кореляційна матриця числових показників"}
-hist_reg_config = {"height": 600, "width": 1200, "title": "Розподіл часу перебування на платформі (дні)"}
-scatter_config = {"height": 600, "width": 1200, "title": "Середній внесок vs. Тривалість перебування",
-                  "labels": {"duration_on_platform": "Тривалість (днів)", "avg_donation_user": "Середній внесок"}}
-bar_config = {"height": 600, "width": 1200, "title": "Середній внесок по місяцях",
-              "labels": {"month": "Місяць", "amount": "Середній внесок"}}
-line_config = {"height": 600, "width": 1200, "title": "Сукупна сума внесків по днях",
-               "labels": {"create_date": "Дата", "amount": "Сума внесків"}}
+hist_reg_config = {"height": 600, "width": 1200, "title": "Розподіл часу перебування (дні)"}
+scatter_config = {
+    "height": 600,
+    "width": 1200,
+    "title": "Середній внесок vs. Тривалість перебування",
+    "labels": {"duration_on_platform": "Тривалість (днів)", "avg_donation_user": "Середній внесок"}
+}
+bar_config = {"height": 600, "width": 1200, "title": "Середній внесок по місяцях", "labels": {"month": "Місяць", "amount": "Середній внесок"}}
+line_config = {"height": 600, "width": 1200, "title": "Сукупна сума внесків по днях", "labels": {"create_date": "Дата", "amount": "Сума внесків"}}
 
-# ---------------------- Побудова діаграм ----------------------
+# побудова базових фігур
 fig_heatmap = px.imshow(corr_matrix, text_auto=True, **heatmap_config)
 fig_heatmap.update_xaxes(title_text="Показники")
 fig_heatmap.update_yaxes(title_text="Показники")
@@ -140,27 +175,29 @@ fig_heatmap.add_annotation(
     xref="paper", yref="paper", x=0.5, y=-0.15, showarrow=False,
     font=dict(size=12, color="#666")
 )
+
 fig_hist_reg = px.histogram(users_df, x="duration_on_platform", nbins=50, **hist_reg_config)
-fig_scatter = px.scatter(donation_stats, x="duration_on_platform", y="avg_donation_user",
-                         color="user_role", **scatter_config)
+fig_scatter = px.scatter(donation_stats, x="duration_on_platform", y="avg_donation_user", color="user_role", **scatter_config)
+
 liqpay_orders_df["month"] = liqpay_orders_df["create_date"].dt.to_period("M").dt.to_timestamp()
 monthly_avg = liqpay_orders_df.groupby("month")["amount"].mean().reset_index()
 fig_avg_donation_month = px.bar(monthly_avg, x="month", y="amount", **bar_config)
+
 orders_by_day = liqpay_orders_df.groupby(liqpay_orders_df["create_date"].dt.date)["amount"].sum().reset_index()
 fig_line = px.line(orders_by_day, x="create_date", y="amount", **line_config)
 
+# підготовка таблиці повороту (pivot) для Dash DataTable
 donation_stats["duration_bin"] = pd.cut(donation_stats["duration_on_platform"], bins=10)
-pivot_table = donation_stats.pivot_table(index="user_role", columns="duration_bin", values="total_donations",
-                                           aggfunc="sum", fill_value=0).reset_index()
+pivot_table = donation_stats.pivot_table(
+    index="user_role", columns="duration_bin", values="total_donations",
+    aggfunc="sum", fill_value=0
+).reset_index()
 pivot_table.columns = pivot_table.columns.map(str)
 pivot_table_div = dash_table.DataTable(
     id='pivot-table',
-    columns=[{"name": str(col), "id": str(col), "editable": True} for col in pivot_table.columns],
-    data=pivot_table.to_dict('records'),
-    filter_action="native",
-    sort_action="native",
-    page_size=15,
-    export_format="csv",
+    columns=[{"name": col, "id": col, "editable": True} for col in pivot_table.columns],
+    data=pivot_table.to_dict("records"),
+    filter_action="native", sort_action="native", page_size=15, export_format="csv",
     style_table={'overflowX': 'auto'},
     style_cell={'textAlign': 'center', 'padding': '5px', 'minWidth': '80px'},
     style_header={'backgroundColor': '#ddd', 'fontWeight': 'bold'},
@@ -168,23 +205,26 @@ pivot_table_div = dash_table.DataTable(
 )
 
 # ---------------------- Аналіз запитів за бригадами ----------------------
-military_personnel_df = load_data("military_personnel.csv")
-brigade_df = load_data("brigade.csv")
 military_personnel_df = military_personnel_df.rename(columns={"id": "mp_id"})
 brigade_df = brigade_df.rename(columns={"id": "brigade_id"})
-requests_merged = requests_df.merge(military_personnel_df, left_on="military_personnel_id", right_on="mp_id", how="left")
-requests_merged = requests_merged.merge(brigade_df, left_on="brigade_id", right_on="brigade_id", how="left")
+requests_merged = requests_df.merge(
+    military_personnel_df, left_on="military_personnel_id", right_on="mp_id", how="left"
+).merge(
+    brigade_df, left_on="brigade_id", right_on="brigade_id", how="left"
+)
 grouped_requests = requests_merged.groupby("name").agg(
     total_requests=("id", "count"),
     total_amount=("amount", "sum"),
     average_amount=("amount", "mean")
 ).reset_index()
-fig_requests_by_brigade = px.bar(grouped_requests, x="name", y="total_amount",
-                                 title="Аналіз заявок: Загальна сума за бригадами",
-                                 labels={"name": "Бригада", "total_amount": "Сума заявок"})
+fig_requests_by_brigade = px.bar(
+    grouped_requests, x="name", y="total_amount",
+    title="Аналіз заявок: Загальна сума за бригадами",
+    labels={"name": "Бригада", "total_amount": "Сума заявок"}
+)
 fig_requests_by_brigade.update_layout(**chart_config_default)
 
-# ---------------------- Аналіз товарів (з додатковою фільтрацією теми) ----------------------
+# ---------------------- Аналіз товарів ----------------------
 if "product" not in requests_df.columns:
     def extract_product(desc):
         m = re.search(r"'([^']+)'", desc)
@@ -199,18 +239,17 @@ def get_product_aggregation(df):
     ).reset_index()
 
 product_group = get_product_aggregation(requests_df)
-fig_products = px.bar(product_group, x="product", y="request_count",
-                      title="Кількість заявок за товарами",
-                      labels={"product": "Товар", "request_count": "Кількість заявок"})
+fig_products = px.bar(
+    product_group, x="product", y="request_count",
+    title="Кількість заявок за товарами",
+    labels={"product": "Товар", "request_count": "Кількість заявок"}
+)
 fig_products.update_layout(**chart_config_default)
 product_table = dash_table.DataTable(
     id="product-table",
     columns=[{"name": col, "id": col, "editable": True} for col in product_group.columns],
     data=product_group.to_dict("records"),
-    filter_action="native",
-    sort_action="native",
-    page_size=15,
-    export_format="csv",
+    filter_action="native", sort_action="native", page_size=15, export_format="csv",
     style_table={'overflowX': 'auto'},
     style_cell={'textAlign': 'center', 'padding': '5px', 'minWidth': '80px'},
     style_header={'backgroundColor': '#ddd', 'fontWeight': 'bold'},
@@ -221,9 +260,9 @@ product_table = dash_table.DataTable(
 def create_star_schema_cytoscape():
     fact = "Liqpay_order"
     dimensions = [
-        "User", "Volunteer", "Military Personnel", "Request", "Levy",
-        "Volunteer_Levy", "Report", "Attachment", "Brigade Codes", "Add Request",
-        "Email Template", "Email Notification", "Email Recipient", "Email Attachment", "AI Chat Messages"
+        "User","Volunteer","Military Personnel","Request","Levy","Volunteer_Levy",
+        "Report","Attachment","Brigade Codes","Add Request","Email Template",
+        "Email Notification","Email Recipient","Email Attachment","AI Chat Messages"
     ]
     elements = [{
         'data': {'id': 'fact', 'label': fact},
@@ -241,143 +280,106 @@ def create_star_schema_cytoscape():
             'position': {'x': x, 'y': y},
             'classes': 'dimension'
         })
-        elements.append({
-            'data': {'source': 'fact', 'target': f'dim{i}'}
-        })
+        elements.append({'data': {'source': 'fact', 'target': f'dim{i}'}})
     return elements
 
 cyto_elements = create_star_schema_cytoscape()
 
-# ---------------------- KPI Cards ----------------------
+# ---------------------- KPI Cards тa Controls ----------------------
 def create_kpi_div(kpi_info):
     kpi_divs = []
     for kpi in kpi_info:
-        value_str = f"{kpi['actual']:.2f}" if isinstance(kpi["actual"], (float, int)) else f"{kpi['actual']}"
-        target_str = f"{kpi['target']:.2f}" if isinstance(kpi["target"], (float, int)) else f"{kpi['target']}"
+        value_str = f"{kpi['actual']:.2f}" if isinstance(kpi["actual"], (int, float)) else str(kpi["actual"])
+        target_str = f"{kpi['target']:.2f}" if isinstance(kpi["target"], (int, float)) else str(kpi["target"])
+        status_class = "success" if kpi["status"] == "Досягнуто" else "failure"
         kpi_divs.append(html.Div([
             html.H3(kpi["name"], className="kpi-heading"),
             html.P(f"Факт: {value_str}", className="kpi-fact"),
             html.P(f"Ціль: {target_str}", className="kpi-target"),
-            html.P(f"Статус: {kpi['status']}", className="kpi-status")
+            html.P(kpi["status"], className=f"kpi-status {status_class}")
         ], className="kpi-card"))
     return html.Div(kpi_divs, className="kpi-container")
 
 kpi_div = create_kpi_div(kpi_info)
 
-# ---------------------- Прогнозування з Prophet ----------------------
-ts_df = liqpay_orders_df.groupby(liqpay_orders_df["create_date"].dt.date)["amount"].sum().reset_index()
-ts_df.columns = ["ds", "y"]
-ts_df["ds"] = pd.to_datetime(ts_df["ds"])
-
-def forecast_donations(horizon_days):
-    model = Prophet(daily_seasonality=True)
-    model.fit(ts_df)
-    future = model.make_future_dataframe(periods=horizon_days)
-    forecast = model.predict(future)
-    fig_forecast = plot_plotly(model, forecast)
-    fig_forecast.update_layout(title=f"Прогноз внесків на наступні {horizon_days} днів", **chart_config_default)
-    return fig_forecast
-
-# ---------------------- Історія KPI ----------------------
-dates = [datetime.today() - timedelta(days=i) for i in range(30)]
-dates = sorted(dates)
-kpi_history_df = pd.DataFrame({
-    "Дата": dates,
-    "Сукупна сума внесків": np.cumsum(np.random.randint(1000, 5000, size=30))
-})
-fig_kpi_history = px.line(
-    kpi_history_df,
-    x="Дата",
-    y="Сукупна сума внесків",
-    title="Історія KPI: Сукупна сума внесків за останні 30 днів",
-    labels={"Сукупна сума внесків": "Сума внесків", "Дата": "Дата"}
-)
-fig_kpi_history.update_layout(**chart_config_default)
-
-# ---------------------- KPI Controls ----------------------
 kpi_controls = html.Div([
     html.H2("Налаштування KPI"),
     html.Div([
         html.Div([
             html.Label("Загальна сума внесків (ціль):", className="input-label"),
-            dcc.Input(id="target-total-donations", type="number", value=default_kpi_targets["Загальна сума донатів"], className="input-field")
+            dcc.Input(id="target-total-donations", type="number",
+                      value=default_kpi_targets["Загальна сума донатів"], className="input-field")
         ], className="kpi-config-group"),
         html.Div([
             html.Label("Середній внесок (ціль):", className="input-label"),
-            dcc.Input(id="target-avg-donation", type="number", value=default_kpi_targets["Середній донат"], className="input-field")
+            dcc.Input(id="target-avg-donation", type="number",
+                      value=default_kpi_targets["Середній донат"], className="input-field")
         ], className="kpi-config-group"),
         html.Div([
             html.Label("Кількість унікальних донорів (ціль):", className="input-label"),
-            dcc.Input(id="target-unique-donors", type="number", value=default_kpi_targets["Кількість унікальних донорів"], className="input-field")
+            dcc.Input(id="target-unique-donors", type="number",
+                      value=default_kpi_targets["Кількість унікальних донорів"], className="input-field")
         ], className="kpi-config-group"),
         html.Div([
             html.Label("Відсоток користувачів, що вносять (ціль):", className="input-label"),
-            dcc.Input(id="target-percent-donors", type="number", value=default_kpi_targets["Відсоток користувачів, що донатять"], className="input-field")
+            dcc.Input(id="target-percent-donors", type="number",
+                      value=default_kpi_targets["Відсоток користувачів, що донатять"], className="input-field")
         ], className="kpi-config-group"),
         html.Div([
             html.Label("Максимальний внесок (ціль):", className="input-label"),
-            dcc.Input(id="target-max-donations", type="number", value=default_kpi_targets["Максимальний донат"], className="input-field")
+            dcc.Input(id="target-max-donations", type="number",
+                      value=default_kpi_targets["Максимальний донат"], className="input-field")
         ], className="kpi-config-group"),
         html.Div([
-            html.Label("Середня тривалість перебування на платформі (днів):", className="input-label"),
-            dcc.Input(id="target-avg-reg-duration", type="number", value=default_kpi_targets["Середня тривалість перебування на платформі (днів)"], className="input-field")
+            html.Label("Середня тривалість перебування (днів):", className="input-label"),
+            dcc.Input(id="target-avg-reg-duration", type="number",
+                      value=default_kpi_targets["Середня тривалість перебування на платформі (днів)"], className="input-field")
         ], className="kpi-config-group"),
         html.Div([
             html.Label("Кореляція (ціль):", className="input-label"),
-            dcc.Input(id="target-corr", type="number", value=default_kpi_targets["Кореляція (перебування vs донати)"], step=0.01, className="input-field")
+            dcc.Input(id="target-corr", type="number", step=0.01,
+                      value=default_kpi_targets["Кореляція (перебування vs донати)"], className="input-field")
         ], className="kpi-config-group"),
         html.Button("Оновити KPI", id="update-kpi-btn", n_clicks=0, className="kpi-config-btn")
     ], className="kpi-config-panel"),
     html.Div(id="kpi-notifications", className="kpi-notification")
 ], className="kpi-controls")
 
-# ---------------------- Інтеграція аналізу волонтерської діяльності ----------------------
-from analyze1 import VolunteerAnalysis
-vol_analysis_instance = VolunteerAnalysis(data_dir="data")
-fig_vol_scatter, fig_vol_topwords = vol_analysis_instance.create_plots(
-    cluster_chart_config={
-        "width": 1300,
-        "height": 700,
-        "title": "Альтернативна візуалізація кластеризації: Репутація vs. Тональність",
-        "legend": {"title": {"text": "Кластер"}}
-    },
-    topwords_chart_config={
-        "width": 1300,
-        "height": 700,
-        "title": "Альтернативний тематичний аналіз: Топ-10 ключових слів"
-    }
+# ---------------------- Побудова Dash-додатку ----------------------
+app = dash.Dash(
+    __name__,
+    suppress_callback_exceptions=True,
+    external_stylesheets=[dbc.themes.BOOTSTRAP, "https://fonts.googleapis.com/css?family=Montserrat:400,600&display=swap"]
 )
 
-# ---------------------- Інтеграція аналізу зборів та звітності ----------------------
-from analyze2 import LevyAnalysis
-levy_analysis_instance = LevyAnalysis(data_dir="data")
-fig_levy_scatter, fig_levy_trend, fig_levy_corr = levy_analysis_instance.create_plots()
-
-# ---------------------- Побудова Dash-додатку ----------------------
-app = dash.Dash(__name__, suppress_callback_exceptions=True, external_stylesheets=[dbc.themes.BOOTSTRAP,
-                                                                                    "https://fonts.googleapis.com/css?family=Montserrat:400,600&display=swap"])
 app.layout = html.Div(className="container-fluid", children=[
     html.Div(className="row", children=[
         html.Div(className="col-md-3 sidebar", children=[
             html.H2("Меню", className="text-center text-success"),
             html.Hr(),
-            dcc.Tabs(id="sidebar-tabs", value="tab-analytics", vertical=True, children=[
-                dcc.Tab(label="Аналітика", value="tab-analytics"),
-                dcc.Tab(label="Зіркова схема", value="tab-star"),
-                dcc.Tab(label="Сегментація донорів", value="tab-segmentation"),
-                dcc.Tab(label="Прогнозування", value="tab-forecast"),
-                dcc.Tab(label="Керування KPI", value="tab-kpi"),
-                dcc.Tab(label="Запити", value="tab-requests"),
-                dcc.Tab(label="Аналіз товарів", value="tab-products"),
-                dcc.Tab(label="Волонтерський аналіз", value="tab-volunteers"),
-                dcc.Tab(label="Аналіз зборів", value="tab-levy")
-            ])
+            dcc.Tabs(
+                id="sidebar-tabs",
+                value="tab-analytics",
+                vertical=True,
+                children=[
+                    dcc.Tab(label="Аналітика", value="tab-analytics"),
+                    dcc.Tab(label="Зіркова схема", value="tab-star"),
+                    dcc.Tab(label="Сегментація донорів", value="tab-segmentation"),
+                    dcc.Tab(label="Прогнозування", value="tab-forecast"),
+                    dcc.Tab(label="Керування KPI", value="tab-kpi"),
+                    dcc.Tab(label="Запити", value="tab-requests"),
+                    dcc.Tab(label="Аналіз товарів", value="tab-products"),
+                    dcc.Tab(label="Волонтерський аналіз", value="tab-volunteers"),
+                    dcc.Tab(label="Аналіз зборів", value="tab-levy"),
+                    dcc.Tab(label="Retention Cohorts", value="tab-cohorts"),
+                ]
+            )
         ]),
         html.Div(className="col-md-9 main", id="main-content")
     ])
 ])
 
-# ---------------------- Callback для перемикання контенту ----------------------
+# ---------------------- Callback перемикання вмісту ----------------------
 @app.callback(
     Output("main-content", "children"),
     Input("sidebar-tabs", "value")
@@ -389,8 +391,8 @@ def render_tab_content(tab_value):
                 html.Label("Фільтр за роллю користувача:"),
                 dcc.Dropdown(
                     id="role-filter",
-                    options=[{"label": role, "value": role} for role in sorted(users_df["user_role"].unique())],
-                    value=[role for role in sorted(users_df["user_role"].unique())],
+                    options=[{"label": r, "value": r} for r in sorted(users_df["user_role"].unique())],
+                    value=sorted(users_df["user_role"].unique()),
                     multi=True
                 ),
                 html.Label("Діапазон часу перебування (днів):"),
@@ -399,33 +401,21 @@ def render_tab_content(tab_value):
                     min=int(users_df["duration_on_platform"].min()),
                     max=int(users_df["duration_on_platform"].max()),
                     value=[int(users_df["duration_on_platform"].min()), int(users_df["duration_on_platform"].max())],
-                    marks={i: str(int(i)) for i in np.linspace(users_df["duration_on_platform"].min(), users_df["duration_on_platform"].max(), 10)}
+                    marks={i: str(i) for i in np.linspace(users_df["duration_on_platform"].min(),
+                                                          users_df["duration_on_platform"].max(), 10)}
                 )
             ]),
-            html.Div([
-                html.H2("Середній внесок vs. Тривалість перебування"),
-                dcc.Graph(id="scatter-graph", figure=fig_scatter)
-            ]),
-            html.Div([
-                html.H2("Середній внесок по місяцях"),
-                dcc.Graph(id="hist-donations", figure=fig_avg_donation_month)
-            ]),
-            html.Div([
-                html.H2("Сукупна сума внесків по днях"),
-                dcc.Graph(id="line-orders", figure=fig_line)
-            ]),
-            html.Div([
-                html.H2("Кореляційна матриця"),
-                dcc.Graph(id="heatmap", figure=fig_heatmap)
-            ]),
-            html.Div([
-                html.H2("Розподіл часу перебування (дні)"),
-                dcc.Graph(id="hist-reg", figure=fig_hist_reg)
-            ]),
-            html.Div(id="kpi-div-updated", children=[
-                html.H2("Ключові показники (KPI)"),
-                kpi_div
-            ])
+            html.Div([html.H2("Середній внесок vs. Тривалість перебування"),
+                      dcc.Graph(id="scatter-graph", figure=fig_scatter)]),
+            html.Div([html.H2("Середній внесок по місяцях"),
+                      dcc.Graph(id="hist-donations", figure=fig_avg_donation_month)]),
+            html.Div([html.H2("Сукупна сума внесків по днях"),
+                      dcc.Graph(id="line-orders", figure=fig_line)]),
+            html.Div([html.H2("Кореляційна матриця"),
+                      dcc.Graph(id="heatmap", figure=fig_heatmap)]),
+            html.Div([html.H2("Розподіл часу перебування (дні)"),
+                      dcc.Graph(id="hist-reg", figure=fig_hist_reg)]),
+            html.Div(id="kpi-div-updated", children=[html.H2("Ключові показники (KPI)"), kpi_div])
         ])
     elif tab_value == "tab-star":
         return html.Div([
@@ -438,23 +428,24 @@ def render_tab_content(tab_value):
                 stylesheet=[
                     {'selector': 'node',
                      'style': {'label': 'data(label)', 'text-valign': 'center',
-                               'color': 'var(--color-gray-900)', 'background-color': 'var(--color-olive-500)',
-                               'width': 50, 'height': 50, 'font-size': 12, 'border-width': 2, 'border-color': 'var(--color-gray-300)'}},
+                               'color': 'var(--color-text)', 'background-color': 'var(--color-primary)',
+                               'width': 50, 'height': 50, 'font-size': 12,
+                               'border-width': 2, 'border-color': '#ddd'}},
                     {'selector': 'node.fact',
-                     'style': {'background-color': 'var(--color-olive-700)', 'width': 70, 'height': 70, 'font-size': 14}},
+                     'style': {'background-color': 'var(--color-secondary)', 'width': 70, 'height': 70, 'font-size': 14}},
                     {'selector': 'edge',
-                     'style': {'line-color': 'var(--color-gray-300)', 'width': 3}}
+                     'style': {'line-color': '#ccc', 'width': 2}}
                 ]
             ),
-            html.Div(id="drill-down")
+            html.Div(id="drill-down", className="mt-4")
         ], className="tab-content")
     elif tab_value == "tab-segmentation":
         return html.Div([
             html.H2("Кластеризація донорів (K-Means)"),
             dcc.Dropdown(
                 id="cluster-filter",
-                options=[{"label": f"Кластер {i}", "value": int(i)} for i in sorted(donation_stats["cluster"].unique())],
-                value=[int(i) for i in sorted(donation_stats["cluster"].unique())],
+                options=[{"label": f"Кластер {i}", "value": i} for i in sorted(donation_stats["cluster"].unique())],
+                value=sorted(donation_stats["cluster"].unique()),
                 multi=True
             ),
             html.Div([dcc.Graph(id="cluster-scatter"), dcc.Graph(id="cluster-box")])
@@ -463,17 +454,24 @@ def render_tab_content(tab_value):
         return html.Div([
             html.H2("Прогнозування внесків"),
             dcc.Slider(
-                id="forecast-horizon-slider",
-                min=30, max=180, step=10, value=90,
+                id="forecast-horizon-slider", min=30, max=180, step=10, value=90,
                 marks={i: str(i) for i in range(30, 181, 10)}
             ),
-            html.Div(id="forecast-output")
+            html.Div(id="forecast-output", className="mt-4")
         ], className="tab-content")
     elif tab_value == "tab-kpi":
         return html.Div([
             kpi_controls,
-            html.Div(id="kpi-div-updated", children=[html.H2("Ключові показники (KPI)"), kpi_div]),
-            html.Div([html.H2("Історія KPI"), dcc.Graph(id="kpi-history", figure=fig_kpi_history)])
+            html.Div(id="kpi-div-updated",
+                     children=[html.H2("Ключові показники (KPI)"), kpi_div]),
+            html.Div([html.H2("Історія KPI"), dcc.Graph(id="kpi-history", figure=px.line(
+                pd.DataFrame({
+                    "Дата": sorted([datetime.today() - timedelta(days=i) for i in range(30)]),
+                    "Сукупна сума внесків": np.cumsum(np.random.randint(1000, 5000, size=30))
+                }),
+                x="Дата", y="Сукупна сума внесків",
+                labels={"Сукупна сума внесків": "Сума внесків", "Дата": "Дата"}
+            ).update_layout(**chart_config_default))])
         ], className="tab-content")
     elif tab_value == "tab-requests":
         return html.Div([
@@ -492,12 +490,8 @@ def render_tab_content(tab_value):
     elif tab_value == "tab-products":
         return html.Div([
             html.H2("Аналіз заявок за товарами"),
-            dcc.Input(
-                id="product-topic-filter",
-                type="text",
-                placeholder="Введіть тему запиту (наприклад, машини, тактична медицина)",
-                className="form-control"
-            ),
+            dcc.Input(id="product-topic-filter", type="text",
+                      placeholder="Введіть тему запиту...", className="form-control mb-2"),
             dcc.Graph(id="product-bar-chart", figure=fig_products),
             dcc.Dropdown(
                 id="product-metric-dropdown",
@@ -506,36 +500,34 @@ def render_tab_content(tab_value):
                     {"label": "Загальна сума заявок", "value": "total_amount"},
                     {"label": "Середня сума заявки", "value": "average_amount"}
                 ],
-                value="request_count", clearable=False, className="w-50"
+                value="request_count", clearable=False, className="w-50 mb-4"
             ),
             html.H2("Таблиця аналізу заявок за товарами"),
             product_table
         ], className="tab-content")
     elif tab_value == "tab-volunteers":
-        from analyze1 import VolunteerAnalysis
+        from analysis_of_volunteer import VolunteerAnalysis
         va = VolunteerAnalysis(data_dir="data")
         fig_vol_scatter, fig_vol_topwords = va.create_plots(
             cluster_chart_config={
-                "width": 1300,
-                "height": 700,
-                "title": "Альтернативна візуалізація кластеризації: Репутація vs. Тональність",
+                "width": 1300, "height": 700,
+                "title": "Кластеризація волонтерів: Репутація vs. Тональність",
                 "legend": {"title": {"text": "Кластер"}}
             },
             topwords_chart_config={
-                "width": 1300,
-                "height": 700,
-                "title": "Альтернативний тематичний аналіз: Топ-10 ключових слів"
+                "width": 1300, "height": 700,
+                "title": "Тематичний аналіз: Топ-10 ключових слів"
             }
         )
         return html.Div([
             html.H2("Аналіз волонтерської діяльності та репутації"),
-            html.H3("Кластеризація волонтерів за репутацією та тональністю"),
+            html.H3("Кластеризація волонтерів"),
             dcc.Graph(id="volunteer-scatter", figure=fig_vol_scatter),
-            html.H3("Тематичний аналіз відгуків (топ-10 ключових слів)"),
+            html.H3("Тематичний аналіз відгуків"),
             dcc.Graph(id="volunteer-topwords", figure=fig_vol_topwords)
         ], className="tab-content")
     elif tab_value == "tab-levy":
-        from analyze2 import LevyAnalysis
+        from analysis_of_fees_and_reporting import LevyAnalysis
         la = LevyAnalysis(data_dir="data")
         fig_levy_scatter, fig_levy_trend, fig_levy_corr = la.create_plots()
         return html.Div([
@@ -544,10 +536,19 @@ def render_tab_content(tab_value):
             dcc.Graph(id="levy-trend", figure=fig_levy_trend),
             dcc.Graph(id="levy-corr", figure=fig_levy_corr)
         ], className="tab-content")
+    elif tab_value == "tab-cohorts":
+        return html.Div([
+            html.H2("Утримання донорів (Retention Cohorts)"),
+            get_cohort_controls(),
+            dcc.Graph(id="cohort-heatmap", figure=make_cohort_figure(liqpay_orders_df, 12, 5)),
+            dcc.Graph(id="cohort-sizes", figure=make_cohort_size_figure(liqpay_orders_df, 5))
+        ], className="tab-content")
     else:
         return html.Div("Виберіть пункт меню.", className="tab-content")
 
-# ---------------------- Callback для оновлення графіків основної аналітики ----------------------
+# ---------------------- Основні Callback-и ----------------------
+
+# Оновлення основної аналітики
 @app.callback(
     [Output("scatter-graph", "figure"),
      Output("hist-donations", "figure"),
@@ -556,41 +557,40 @@ def render_tab_content(tab_value):
      Input("reg-duration-slider", "value")]
 )
 def update_main_analytics(selected_roles, reg_duration_range):
-    filtered_stats = donation_stats[
+    filtered = donation_stats[
         (donation_stats["user_role"].isin(selected_roles)) &
         (donation_stats["duration_on_platform"] >= reg_duration_range[0]) &
         (donation_stats["duration_on_platform"] <= reg_duration_range[1])
     ]
-    updated_scatter = px.scatter(
-        filtered_stats,
-        x="duration_on_platform",
-        y="avg_donation_user",
+    fig1 = px.scatter(
+        filtered, x="duration_on_platform", y="avg_donation_user",
         color="user_role",
         title="Середній внесок vs. Тривалість перебування",
         labels={"duration_on_platform": "Тривалість (днів)", "avg_donation_user": "Середній внесок"}
     )
-    updated_scatter.update_layout(**chart_config_default)
+    fig1.update_layout(**chart_config_default)
+
     liqpay_orders_df["month"] = liqpay_orders_df["create_date"].dt.to_period("M").dt.to_timestamp()
-    monthly_avg = liqpay_orders_df.groupby("month")["amount"].mean().reset_index()
-    updated_hist = px.bar(
-        monthly_avg,
-        x="month",
-        y="amount",
+    monthly_avg2 = liqpay_orders_df.groupby("month")["amount"].mean().reset_index()
+    fig2 = px.bar(
+        monthly_avg2, x="month", y="amount",
         title="Середній внесок по місяцях",
         labels={"month": "Місяць", "amount": "Середній внесок"}
     )
-    updated_hist.update_layout(**chart_config_default)
-    updated_hist_reg = px.histogram(
-        users_df[(users_df["duration_on_platform"] >= reg_duration_range[0]) &
-                 (users_df["duration_on_platform"] <= reg_duration_range[1])],
-        x="duration_on_platform",
-        nbins=50,
-        title="Розподіл часу перебування (дні)",
-        labels={"duration_on_platform": "Тривалість (днів)"}
-    )
-    updated_hist_reg.update_layout(**chart_config_default)
-    return updated_scatter, updated_hist, updated_hist_reg
+    fig2.update_layout(**chart_config_default)
 
+    df3 = users_df[
+        (users_df["duration_on_platform"] >= reg_duration_range[0]) &
+        (users_df["duration_on_platform"] <= reg_duration_range[1])
+    ]
+    fig3 = px.histogram(df3, x="duration_on_platform", nbins=50,
+                        title="Розподіл часу перебування (дні)",
+                        labels={"duration_on_platform": "Тривалість (днів)"})
+    fig3.update_layout(**chart_config_default)
+
+    return fig1, fig2, fig3
+
+# Дрилл-даун для Star Schema
 @app.callback(
     Output("drill-down", "children"),
     Input("star-schema", "tapNodeData")
@@ -598,108 +598,97 @@ def update_main_analytics(selected_roles, reg_duration_range):
 def drill_down(nodeData):
     if not nodeData:
         return "Натисніть на вузол для перегляду деталей."
-    node_label = nodeData.get("label")
-    if node_label == "User":
-        fig = px.histogram(users_df, x="duration_on_platform", nbins=20, title="Деталізація: Тривалість перебування")
-        return dcc.Graph(figure=fig, style={"width": "100%", "height": "600px"})
-    elif node_label == "Request":
+    label = nodeData.get("label")
+    if label == "User":
+        fig = px.histogram(users_df, x="duration_on_platform", nbins=20,
+                           title="Деталізація: Тривалість перебування")
+        return dcc.Graph(figure=fig)
+    if label == "Request":
         try:
-            req_df = load_data("request.csv")
-            fig = px.histogram(req_df, x="amount", nbins=30, title="Деталізація: Суми заявок")
-            return dcc.Graph(figure=fig, style={"width": "100%", "height": "600px"})
+            df = load_data("request.csv")
+            fig = px.histogram(df, x="amount", nbins=30, title="Деталізація: Суми заявок")
+            return dcc.Graph(figure=fig)
         except Exception as e:
-            return f"Помилка: {str(e)}"
-    elif node_label == "Liqpay_order":
-        orders_by_day = liqpay_orders_df.groupby(liqpay_orders_df["create_date"].dt.date)["amount"].sum().reset_index()
-        fig = px.line(orders_by_day, x="create_date", y="amount", title="Деталізація: Тренд транзакцій")
-        return dcc.Graph(figure=fig, style={"width": "100%", "height": "600px"})
-    else:
-        return f"Вибрано: {node_label}. Деталі недоступні."
+            return f"Помилка: {e}"
+    if label == "Liqpay_order":
+        ob = liqpay_orders_df.groupby(liqpay_orders_df["create_date"].dt.date)["amount"].sum().reset_index()
+        fig = px.line(ob, x="create_date", y="amount", title="Деталізація: Тренд транзакцій")
+        return dcc.Graph(figure=fig)
+    return f"Вибрано: {label}. Деталі недоступні."
 
+# Кластери донорів
 @app.callback(
-    [Output("cluster-scatter", "figure"),
-     Output("cluster-box", "figure")],
+    [Output("cluster-scatter", "figure"), Output("cluster-box", "figure")],
     Input("cluster-filter", "value")
 )
 def update_clusters(selected_clusters):
-    filtered_clusters = donation_stats[donation_stats["cluster"].isin(selected_clusters)]
-    fig_scatter_cluster = px.scatter(
-        filtered_clusters,
-        x="duration_on_platform",
-        y="total_donations",
+    filt = donation_stats[donation_stats["cluster"].isin(selected_clusters)]
+    fig_sc = px.scatter(
+        filt, x="duration_on_platform", y="total_donations",
         color="cluster",
         title="Кластеризація: Тривалість vs. Сума внесків",
         labels={"duration_on_platform": "Тривалість (днів)", "total_donations": "Сума внесків", "cluster": "Кластер"}
     )
-    fig_scatter_cluster.update_layout(**chart_config_default)
-    fig_box_cluster = px.box(
-        filtered_clusters,
-        x="cluster",
-        y="total_donations",
+    fig_sc.update_layout(**chart_config_default)
+    fig_box = px.box(
+        filt, x="cluster", y="total_donations",
         title="Розподіл внесків за кластерами",
         labels={"cluster": "Кластер", "total_donations": "Сума внесків"}
     )
-    fig_box_cluster.update_layout(**chart_config_default)
-    return fig_scatter_cluster, fig_box_cluster
+    fig_box.update_layout(**chart_config_default)
+    return fig_sc, fig_box
 
+# Прогнозування
 @app.callback(
     Output("forecast-output", "children"),
     Input("forecast-horizon-slider", "value")
 )
 def update_forecast(horizon):
     try:
-        model = Prophet(daily_seasonality=True)
-        model.fit(ts_df)
-        future = model.make_future_dataframe(periods=horizon)
-        forecast = model.predict(future)
-        fig_forecast = plot_plotly(model, forecast)
-        fig_forecast.update_layout(title=f"Прогноз внесків на {horizon} днів", **chart_config_default)
-        return dcc.Graph(figure=fig_forecast)
+        fig = forecast_donations(horizon)
+        return dcc.Graph(figure=fig)
     except Exception as e:
-        return html.P(f"Помилка прогнозування: {str(e)}", style={"color": "red"})
+        return html.P(f"Помилка прогнозування: {e}", style={"color": "red"})
 
+# Оновлення KPI
 @app.callback(
-    [Output("kpi-notifications", "children"),
-     Output("kpi-div-updated", "children")],
-    [Input("update-kpi-btn", "n_clicks")],
-    [State("target-total-donations", "value"),
-     State("target-avg-donation", "value"),
-     State("target-unique-donors", "value"),
-     State("target-percent-donors", "value"),
-     State("target-max-donations", "value"),
-     State("target-avg-reg-duration", "value"),
-     State("target-corr", "value"),
-     State("kpi-div-updated", "children")]
+    [Output("kpi-notifications", "children"), Output("kpi-div-updated", "children")],
+    Input("update-kpi-btn", "n_clicks"),
+    State("target-total-donations", "value"), State("target-avg-donation", "value"),
+    State("target-unique-donors", "value"), State("target-percent-donors", "value"),
+    State("target-max-donations", "value"), State("target-avg-reg-duration", "value"),
+    State("target-corr", "value"), State("kpi-div-updated", "children")
 )
-def update_kpi(n_clicks, total_target, avg_target, unique_target, percent_target, max_target, avg_reg_target, corr_target, kpi_content):
-    if n_clicks == 0:
-        return "", kpi_content
+def update_kpi(n, total_t, avg_t, uniq_t, perc_t, max_t, avg_reg_t, corr_t, old):
+    if n == 0:
+        return "", old
     new_targets = {
-        "Загальна сума донатів": total_target,
-        "Середній донат": avg_target,
-        "Кількість унікальних донорів": unique_target,
-        "Відсоток користувачів, що донатять": percent_target,
-        "Максимальний донат": max_target,
-        "Середня тривалість перебування на платформі (днів)": avg_reg_target,
-        "Кореляція (перебування vs донати)": corr_target
+        "Загальна сума донатів": total_t,
+        "Середній донат": avg_t,
+        "Кількість унікальних донорів": uniq_t,
+        "Відсоток користувачів, що донатять": perc_t,
+        "Максимальний донат": max_t,
+        "Середня тривалість перебування на платформі (днів)": avg_reg_t,
+        "Кореляція (перебування vs донати)": corr_t
     }
-    new_kpi_info = calculate_kpi_info(new_targets)
-    messages = []
-    for kpi in new_kpi_info:
-        if kpi["status"] == "Не досягнуто":
-            messages.append(html.P(
-                f"Попередження! {kpi['name']} не досягнуто: {kpi['actual']:.2f} vs {kpi['target']:.2f}.",
+    new_info = calculate_kpi_info(new_targets)
+    msgs = []
+    for k in new_info:
+        if k["status"] == "Не досягнуто":
+            msgs.append(html.P(
+                f"Попередження! {k['name']} не досягнуто: {k['actual']:.2f} vs {k['target']:.2f}.",
                 style={"color": "red", "textAlign": "center"}
             ))
-    if not messages:
-        messages = html.P("Всі KPI відповідають встановленим цілям.", style={"color": "green", "textAlign": "center"})
-    updated_kpi_div = create_kpi_div(new_kpi_info)
-    new_content = html.Div(id="kpi-div-updated", children=[
+    if not msgs:
+        msgs = html.P("Всі KPI відповідають встановленим цілям.", style={"color": "green", "textAlign": "center"})
+    updated_div = create_kpi_div(new_info)
+    content = html.Div([
         html.H2("Ключові показники (KPI)", className="section-heading"),
-        updated_kpi_div
+        updated_div
     ], className="kpi-section")
-    return messages, new_content
+    return msgs, content
 
+# Аналіз заявок
 @app.callback(
     Output("requests-analysis-graph", "figure"),
     Input("request-metric-dropdown", "value")
@@ -711,33 +700,50 @@ def update_requests_analysis(metric):
         "total_requests": "Кількість заявок",
         "total_amount": "Сума заявок",
         "average_amount": "Середня сума заявки"
-    }.get(metric, metric)
+    }[metric]
     fig = px.bar(
-        grouped_requests,
-        x="name",
-        y=metric,
+        grouped_requests, x="name", y=metric,
         title=f"Аналіз заявок: {y_label} за бригадами",
         labels={"name": "Бригада", metric: y_label}
     )
     fig.update_layout(**chart_config_default)
     return fig
 
+# Аналіз товарів
 @app.callback(
     Output("product-bar-chart", "figure"),
-    [Input("product-metric-dropdown", "value"),
-     Input("product-topic-filter", "value")]
+    [Input("product-metric-dropdown", "value"), Input("product-topic-filter", "value")]
 )
-def update_product_chart(metric, topic_filter):
+def update_product_chart(metric, topic):
     df = requests_df.copy()
-    if topic_filter and topic_filter.strip() != "":
-        df = df[df["description"].str.contains(topic_filter, case=False, na=False)]
-    product_group = get_product_aggregation(df)
-    y_label = {"request_count": "Кількість заявок", "total_amount": "Загальна сума заявок", "average_amount": "Середня сума заявки"}.get(metric, metric)
-    fig = px.bar(product_group, x="product", y=metric,
-                 title=f"Показник: {y_label} за товарами",
-                 labels={"product": "Товар", metric: y_label})
+    if topic and topic.strip():
+        df = df[df["description"].str.contains(topic, case=False, na=False)]
+    pg = get_product_aggregation(df)
+    y_label = {
+        "request_count": "Кількість заявок",
+        "total_amount": "Загальна сума заявок",
+        "average_amount": "Середня сума заявки"
+    }[metric]
+    fig = px.bar(
+        pg, x="product", y=metric,
+        title=f"Показник: {y_label} за товарами",
+        labels={"product": "Товар", metric: y_label}
+    )
     fig.update_layout(**chart_config_default)
     return fig
 
-if __name__ == '__main__':
+# ---------------------- Callback для Retention Cohorts ----------------------
+@app.callback(
+    [Output("cohort-heatmap", "figure"),
+     Output("cohort-sizes",   "figure")],
+    [Input("cohort-max-periods", "value"),
+     Input("cohort-min-users",   "value")]
+)
+def update_cohort_charts(max_months, min_users):
+    return (
+        make_cohort_figure(liqpay_orders_df, max_months, min_users),
+        make_cohort_size_figure(liqpay_orders_df,     min_users)
+    )
+# ---------------------- Запуск ----------------------
+if __name__ == "__main__":
     app.run(debug=True)
