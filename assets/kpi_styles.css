@@ -1,118 +1,183 @@
-/* kpi_styles.css */
 
-/* Основні змінні вже мають бути задані, наприклад, через :root в іншому файлі стилів.
-   Переконайтесь, що у вас є змінні типу:
-   --color-olive-500, --color-olive-700, --color-gray-300, --color-gray-800, --color-white, --color-success-500, --color-success-700.
-*/
-
-/* Контейнер для блоку Налаштування KPI */
+/* ----------------------------------------
+   KPI Configuration Panel
+   ---------------------------------------- */
 .kpi-config-panel {
   background-color: var(--color-white);
   border: 2px solid var(--color-gray-300);
   border-radius: 8px;
-  padding: 25px 30px;
-  margin: 30px auto;
+  padding: 30px;
+  margin: 2rem auto;
   max-width: 600px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  animation: slideDownFade 0.5s ease forwards;
 }
 
-/* Заголовок блоку */
+/* Header */
 .kpi-config-panel h2 {
   text-align: center;
-  font-size: 28px;
+  font-size: 2rem;
   font-weight: 600;
   color: var(--color-olive-700);
-  margin-bottom: 25px;
+  margin: 0;
 }
 
-/* Окремий блок для кожного поля вводу */
+/* ----------------------------------------
+   Form Groups
+   ---------------------------------------- */
 .kpi-config-group {
-  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
 }
 
-/* Підписи до полів */
+/* Label */
 .kpi-config-group label {
-  display: block;
-  margin-bottom: 8px;
-  font-size: 16px;
+  font-size: 1rem;
   font-weight: 600;
   color: var(--color-gray-800);
+  margin-bottom: 0.5rem;
+  position: relative;
 }
 
-/* Стилізація полів введення */
+/* Label tooltip icon */
+.kpi-config-group label::after {
+  content: "ⓘ";
+  font-size: 0.85rem;
+  color: var(--color-gray-500);
+  margin-left: 0.5rem;
+  cursor: help;
+  transition: color 0.2s ease-in-out;
+}
+.kpi-config-group label:hover::after {
+  color: var(--color-olive-500);
+}
+
+/* Input Field */
 .kpi-config-group input {
-  width: 100%;
-  padding: 10px 12px;
-  font-size: 16px;
+  font-size: 1rem;
+  padding: 0.75rem;
   border: 1px solid var(--color-gray-300);
   border-radius: 4px;
   color: var(--color-gray-900);
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
-  transition: border-color 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
-
 .kpi-config-group input:focus {
-  border-color: var(--color-olive-500);
   outline: none;
+  border-color: var(--color-olive-500);
+  box-shadow: 0 0 0 4px rgba(85,107,47,0.15);
+}
+/* Remove spinner in number inputs */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
 }
 
-/* Стиль кнопки – підтвердження/оновлення KPI */
+/* Placeholder styling */
+.kpi-config-group input::placeholder {
+  color: var(--color-gray-300);
+  font-style: italic;
+}
+.kpi-config-group input:focus::placeholder {
+  color: transparent;
+}
+
+/* Invalid input state */
+.kpi-config-group input.invalid {
+  border-color: var(--color-failure);
+  background-color: rgba(170,69,32,0.1);
+}
+.kpi-config-group input.invalid:focus {
+  box-shadow: 0 0 0 4px rgba(170,69,32,0.2);
+}
+
+/* ----------------------------------------
+   Update Button
+   ---------------------------------------- */
 .kpi-config-btn {
-  display: block;
-  width: 100%;
-  padding: 12px;
-  margin-top: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background-color: var(--color-success-500);
   color: var(--color-white);
-  font-size: 18px;
+  padding: 0.85rem 1.5rem;
+  font-size: 1rem;
   font-weight: 600;
-  border: none;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border: 2px solid var(--color-olive-700);
   border-radius: 4px;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+  grid-column: 1 / -1;
 }
-
 .kpi-config-btn:hover {
   background-color: var(--color-success-700);
+  transform: translateY(-2px);
+}
+.kpi-config-btn:active {
+  transform: translateY(0);
 }
 
-/* Повідомлення для KPI */
+/* ----------------------------------------
+   Notification Messages
+   ---------------------------------------- */
 .kpi-notification {
-  margin-top: 20px;
-  padding: 10px;
+  padding: 1rem;
   border-radius: 4px;
-  text-align: center;
   font-weight: 600;
+  text-align: center;
+  animation: fadeIn 0.4s ease forwards;
+  margin-top: 1rem;
 }
-
-/* Зелений фон для повідомлень, коли KPI досягнуто */
+/* Success */
 .kpi-notification.success {
-  background-color: var(--color-success-50, #eefeea);
-  color: var(--color-success-700, #2a6c2b);
+  background-color: rgba(67,113,31,0.1);
+  color: var(--color-success-500);
 }
-
-/* Червоний фон для попереджень, коли KPI не досягнуто */
+/* Failure */
 .kpi-notification.failure {
-  background-color: var(--color-failure-50, #fdeee5);
-  color: var(--color-failure, #aa4520);
+  background-color: rgba(170,69,32,0.1);
+  color: var(--color-failure);
 }
 
-/* Додатково адаптивність */
+/* ----------------------------------------
+   Animations
+   ---------------------------------------- */
+@keyframes slideDownFade {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ----------------------------------------
+   Responsive Adjustments
+   ---------------------------------------- */
 @media (max-width: 768px) {
   .kpi-config-panel {
-    padding: 20px;
-    margin: 20px;
-    max-width: 95%;
+    padding: 1.5rem;
+    margin: 1rem;
   }
   .kpi-config-panel h2 {
-    font-size: 24px;
+    font-size: 1.75rem;
   }
   .kpi-config-group label,
   .kpi-config-group input {
-    font-size: 14px;
+    font-size: 0.9rem;
   }
   .kpi-config-btn {
-    font-size: 16px;
-    padding: 10px;
+    width: 100%;
+    font-size: 0.95rem;
+    padding: 0.75rem;
   }
 }

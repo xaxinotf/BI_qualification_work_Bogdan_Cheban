@@ -1,6 +1,13 @@
-/* assets/custom.css */
 
-/* Застосування базових стилів для всього інтерфейсу */
+
+/* ========================================
+   Базові стилі
+   ======================================== */
+:root {
+  --transition-fast: 0.2s ease-in-out;
+  --border-radius: 8px;
+}
+
 body {
   background-color: var(--color-gray-50);
   color: var(--color-gray-900);
@@ -9,130 +16,267 @@ body {
   padding: 0;
 }
 
-/* Стилізація заголовків */
 h1, h2, h3 {
   text-align: center;
+  margin-bottom: 1rem;
 }
 
-/* Стилі для кнопок */
-.custom-btn {
-  background-color: var(--color-success-500);
-  color: var(--color-white);
-  padding: 10px 20px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  margin: 10px 0;
-  font-weight: 600;
-  transition: background-color 0.3s ease;
-}
+h1 { font-size: 2.5rem; color: var(--color-olive-700); }
+h2 { font-size: 2rem;   color: var(--color-olive-500); }
+h3 { font-size: 1.5rem; color: var(--color-olive-300); }
 
-.custom-btn:hover {
-  background-color: var(--color-success-700);
-}
-
-/* Стилі для контейнерів */
+/* ========================================
+   Контейнери та сітка
+   ======================================== */
 .container-fluid {
-  padding: 0 15px;
+  padding: 0 1rem;
 }
 
 .sidebar {
   background-color: var(--color-white);
-  padding: 20px;
+  padding: 1.5rem;
   border-right: 2px solid var(--color-gray-300);
   min-height: 100vh;
 }
 
 .main {
-  padding: 20px;
+  padding: 1.5rem;
 }
 
-/* Стилі для вкладок та фільтрів */
-.tab-content {
-  margin-top: 20px;
-}
-
-.filter-panel {
-  margin-bottom: 20px;
-  background-color: var(--color-white);
-  padding: 15px;
-  border: 1px solid var(--color-gray-300);
-  border-radius: 4px;
-}
-
+.filter-panel,
 .kpi-controls {
-  margin-bottom: 20px;
   background-color: var(--color-white);
-  padding: 15px;
+  padding: 1.25rem;
   border: 1px solid var(--color-gray-300);
-  border-radius: 4px;
+  border-radius: var(--border-radius);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+  margin-bottom: 1.5rem;
 }
 
-/* KPI Cards */
+/* ========================================
+   Форми та інпут-поля
+   ======================================== */
+.input-label {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--color-gray-700);
+  display: block;
+}
+
+.input-field,
+input, select, textarea {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--color-gray-300);
+  border-radius: var(--border-radius);
+  font-size: 1rem;
+  margin-bottom: 1rem;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.input-field:focus,
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--color-olive-500);
+  box-shadow: 0 0 0 3px rgba(85,107,47,0.2);
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Placeholder */
+.input-field::placeholder {
+  color: var(--color-gray-300);
+  opacity: 1;
+}
+.input-field:focus::placeholder {
+  color: transparent;
+}
+
+/* ========================================
+   Кнопки
+   ======================================== */
+.custom-btn,
+.kpi-config-btn,
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-success-500);
+  color: var(--color-white);
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  border: none;
+  border-radius: var(--border-radius);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), transform 0.1s ease;
+}
+
+.custom-btn:hover,
+.kpi-config-btn:hover,
+button:hover {
+  background-color: var(--color-success-700);
+}
+.custom-btn:active,
+.kpi-config-btn:active,
+button:active {
+  transform: scale(0.98);
+}
+
+/* ========================================
+   KPI-карти
+   ======================================== */
 .kpi-container {
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-around;
+  gap: 1rem;
+  justify-content: space-evenly;
 }
 
 .kpi-card {
   background-color: var(--color-white);
-  border: 2px solid var(--color-gray-300);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  padding: 20px;
-  margin: 10px;
-  width: calc(33% - 20px);
-  border-radius: 4px;
+  border: 1px solid var(--color-gray-300);
+  border-radius: var(--border-radius);
+  padding: 1.5rem;
+  width: calc(33% - 2rem);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+.kpi-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
 }
 
 .kpi-heading {
-  text-align: center;
-  margin-bottom: 10px;
+  margin-bottom: 1rem;
   color: var(--color-olive-700);
+  font-size: 1.25rem;
 }
-
 .kpi-fact {
-  text-align: center;
-  font-size: 16px;
   color: var(--color-gray-900);
-  margin: 5px 0;
 }
-
 .kpi-target {
-  text-align: center;
-  font-size: 16px;
   color: var(--color-olive-500);
-  margin: 5px 0;
 }
-
 .kpi-status {
-  text-align: center;
-  font-size: 16px;
-  color: var(--color-failure-500); /* Використовується для статусу "Не досягнуто" */
-  margin: 5px 0;
+  font-weight: 700;
+  margin-top: 0.75rem;
+  color: var(--color-failure);
 }
-
-/* Якщо KPI досягнуто, використовуйте зелений колір */
 .kpi-status.success {
   color: var(--color-success-500);
 }
 
-/* Повідомлення KPI */
-.notification {
-  margin-top: 20px;
-  padding: 10px;
-  border-radius: 4px;
+/* ========================================
+   Повідомлення та нотифікації
+   ======================================== */
+.notification,
+.kpi-notification {
+  padding: 1rem;
+  border-radius: var(--border-radius);
   font-weight: 600;
   text-align: center;
+  margin-top: 1rem;
+  animation: fadeIn 0.4s ease forwards;
+}
+.notification.success,
+.kpi-notification.success {
+  background-color: rgba(67,113,31,0.1);
+  color: var(--color-success-500);
+}
+.notification.warning,
+.kpi-notification.warning {
+  background-color: rgba(218,154,51,0.1);
+  color: var(--color-warning);
+}
+.notification.failure,
+.kpi-notification.failure {
+  background-color: rgba(170,69,32,0.1);
+  color: var(--color-failure);
 }
 
-/* Таблиці */
-.dash-table-container {
-  margin-top: 20px;
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
+/* ========================================
+   Dash Components
+   ======================================== */
+/* RangeSlider (rc-slider) */
+.rc-slider {
+  margin: 1rem 0;
+}
+.rc-slider-rail {
+  height: 6px;
+  background: var(--color-gray-300);
+}
+.rc-slider-track {
+  height: 6px;
+  background: var(--color-olive-500);
+}
+.rc-slider-handle {
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border: 2px solid var(--color-olive-700);
+  background: var(--color-white);
+  transition: border-color var(--transition-fast);
+}
+.rc-slider-handle:hover {
+  border-color: var(--color-olive-900);
+}
+
+/* Таблиці Dash */
+.dash-table-container .dash-table {
+  border: 1px solid var(--color-gray-300);
+  border-radius: var(--border-radius);
+  overflow: hidden;
+}
+.dash-table-container .dash-table-container .dash-spreadsheet-container {
+  box-shadow: none;
+}
+
+/* Вкладки (Tabs) */
+.dash-tabs {
+  border-bottom: 2px solid var(--color-gray-300);
+}
+.dash-tabs .tab {
+  padding: 0.75rem 1.5rem;
+  margin-right: 0.5rem;
+  border-radius: var(--border-radius) var(--border-radius) 0 0;
+  background: var(--color-gray-100);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.dash-tabs .tab--selected {
+  background: var(--color-white);
+  border: 1px solid var(--color-gray-300);
+  border-bottom: none;
+  color: var(--color-olive-700);
+}
+
+/* Cytoscape контейнер */
+#star-schema {
+  border: 1px solid var(--color-gray-300);
+  border-radius: var(--border-radius);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+}
+
+/* ========================================
+   Адаптивність
+   ======================================== */
+@media (max-width: 1200px) {
+  .kpi-card { width: calc(50% - 2rem); }
+}
 @media (max-width: 768px) {
-  .kpi-card {
-    width: 100%;
-  }
+  .kpi-card { width: 100%; }
+  .filter-panel,
+  .kpi-controls { padding: 1rem; }
+  .sidebar { display: none; }
+  .main { padding: 1rem; }
 }
