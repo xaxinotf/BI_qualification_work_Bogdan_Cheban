@@ -1,0 +1,138 @@
+/* assets/custom.css */
+
+/* Застосування базових стилів для всього інтерфейсу */
+body {
+  background-color: var(--color-gray-50);
+  color: var(--color-gray-900);
+  font-family: 'Montserrat', sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+/* Стилізація заголовків */
+h1, h2, h3 {
+  text-align: center;
+}
+
+/* Стилі для кнопок */
+.custom-btn {
+  background-color: var(--color-success-500);
+  color: var(--color-white);
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin: 10px 0;
+  font-weight: 600;
+  transition: background-color 0.3s ease;
+}
+
+.custom-btn:hover {
+  background-color: var(--color-success-700);
+}
+
+/* Стилі для контейнерів */
+.container-fluid {
+  padding: 0 15px;
+}
+
+.sidebar {
+  background-color: var(--color-white);
+  padding: 20px;
+  border-right: 2px solid var(--color-gray-300);
+  min-height: 100vh;
+}
+
+.main {
+  padding: 20px;
+}
+
+/* Стилі для вкладок та фільтрів */
+.tab-content {
+  margin-top: 20px;
+}
+
+.filter-panel {
+  margin-bottom: 20px;
+  background-color: var(--color-white);
+  padding: 15px;
+  border: 1px solid var(--color-gray-300);
+  border-radius: 4px;
+}
+
+.kpi-controls {
+  margin-bottom: 20px;
+  background-color: var(--color-white);
+  padding: 15px;
+  border: 1px solid var(--color-gray-300);
+  border-radius: 4px;
+}
+
+/* KPI Cards */
+.kpi-container {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-around;
+}
+
+.kpi-card {
+  background-color: var(--color-white);
+  border: 2px solid var(--color-gray-300);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  padding: 20px;
+  margin: 10px;
+  width: calc(33% - 20px);
+  border-radius: 4px;
+}
+
+.kpi-heading {
+  text-align: center;
+  margin-bottom: 10px;
+  color: var(--color-olive-700);
+}
+
+.kpi-fact {
+  text-align: center;
+  font-size: 16px;
+  color: var(--color-gray-900);
+  margin: 5px 0;
+}
+
+.kpi-target {
+  text-align: center;
+  font-size: 16px;
+  color: var(--color-olive-500);
+  margin: 5px 0;
+}
+
+.kpi-status {
+  text-align: center;
+  font-size: 16px;
+  color: var(--color-failure-500); /* Використовується для статусу "Не досягнуто" */
+  margin: 5px 0;
+}
+
+/* Якщо KPI досягнуто, використовуйте зелений колір */
+.kpi-status.success {
+  color: var(--color-success-500);
+}
+
+/* Повідомлення KPI */
+.notification {
+  margin-top: 20px;
+  padding: 10px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Таблиці */
+.dash-table-container {
+  margin-top: 20px;
+}
+
+@media (max-width: 768px) {
+  .kpi-card {
+    width: 100%;
+  }
+}

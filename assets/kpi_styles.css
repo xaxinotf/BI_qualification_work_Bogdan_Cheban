@@ -1,0 +1,118 @@
+/* kpi_styles.css */
+
+/* Основні змінні вже мають бути задані, наприклад, через :root в іншому файлі стилів.
+   Переконайтесь, що у вас є змінні типу:
+   --color-olive-500, --color-olive-700, --color-gray-300, --color-gray-800, --color-white, --color-success-500, --color-success-700.
+*/
+
+/* Контейнер для блоку Налаштування KPI */
+.kpi-config-panel {
+  background-color: var(--color-white);
+  border: 2px solid var(--color-gray-300);
+  border-radius: 8px;
+  padding: 25px 30px;
+  margin: 30px auto;
+  max-width: 600px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Заголовок блоку */
+.kpi-config-panel h2 {
+  text-align: center;
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--color-olive-700);
+  margin-bottom: 25px;
+}
+
+/* Окремий блок для кожного поля вводу */
+.kpi-config-group {
+  margin-bottom: 20px;
+}
+
+/* Підписи до полів */
+.kpi-config-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-gray-800);
+}
+
+/* Стилізація полів введення */
+.kpi-config-group input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 16px;
+  border: 1px solid var(--color-gray-300);
+  border-radius: 4px;
+  color: var(--color-gray-900);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
+  transition: border-color 0.2s ease;
+}
+
+.kpi-config-group input:focus {
+  border-color: var(--color-olive-500);
+  outline: none;
+}
+
+/* Стиль кнопки – підтвердження/оновлення KPI */
+.kpi-config-btn {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  margin-top: 20px;
+  background-color: var(--color-success-500);
+  color: var(--color-white);
+  font-size: 18px;
+  font-weight: 600;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.kpi-config-btn:hover {
+  background-color: var(--color-success-700);
+}
+
+/* Повідомлення для KPI */
+.kpi-notification {
+  margin-top: 20px;
+  padding: 10px;
+  border-radius: 4px;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* Зелений фон для повідомлень, коли KPI досягнуто */
+.kpi-notification.success {
+  background-color: var(--color-success-50, #eefeea);
+  color: var(--color-success-700, #2a6c2b);
+}
+
+/* Червоний фон для попереджень, коли KPI не досягнуто */
+.kpi-notification.failure {
+  background-color: var(--color-failure-50, #fdeee5);
+  color: var(--color-failure, #aa4520);
+}
+
+/* Додатково адаптивність */
+@media (max-width: 768px) {
+  .kpi-config-panel {
+    padding: 20px;
+    margin: 20px;
+    max-width: 95%;
+  }
+  .kpi-config-panel h2 {
+    font-size: 24px;
+  }
+  .kpi-config-group label,
+  .kpi-config-group input {
+    font-size: 14px;
+  }
+  .kpi-config-btn {
+    font-size: 16px;
+    padding: 10px;
+  }
+}
