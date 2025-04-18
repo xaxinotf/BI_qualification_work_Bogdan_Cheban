@@ -1,0 +1,119 @@
+// assets/styles.scss
+
+@use 'sass:map';
+
+// Визначення палітри кольорів
+$definitions: (
+  'olive': (
+    '50': #eef0ea,
+    '100': #dde1d5,
+    '300': #829661,
+    '500': #556b2f,
+    '700': #33401c,
+    '900': #111509
+  ),
+  'gray': (
+    '50': #f1f1f1,
+    '100': #e3e3e3,
+    '300': #aaaaaa,
+    '500': #727272,
+    '700': #444444,
+    '900': #171717
+  ),
+  'white': #ffffff,
+  'failure': #aa4520,
+  'warning': #da9a33,
+  'success': #43711f
+);
+
+// Генерація CSS-перемінних
+:root {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+
+  @each $color-name, $color-shades in $definitions {
+    @if type-of($color-shades) == 'map' {
+      @each $shade, $value in $color-shades {
+        --color-#{$color-name}-#{$shade}: #{$value};
+      }
+    } @else {
+      --color-#{$color-name}: #{$color-shades};
+    }
+  }
+}
+
+// Глобальні стилі для body та заголовків
+body {
+  background-color: var(--color-gray-50);
+  color: var(--color-gray-900);
+  margin: 0;
+  padding: 0;
+}
+
+h1 {
+  font-size: 36px;
+  font-weight: 600;
+  margin-bottom: 20px;
+  color: var(--color-olive-700);
+}
+
+h2 {
+  font-size: 28px;
+  font-weight: 600;
+  margin-bottom: 15px;
+  color: var(--color-olive-500);
+}
+
+h3 {
+  font-size: 22px;
+  font-weight: 500;
+  margin-bottom: 10px;
+  color: var(--color-olive-300);
+}
+
+// Форма та кнопки
+label,
+.input-label {
+  font-weight: 600;
+  margin-bottom: 5px;
+  display: block;
+  color: var(--color-gray-700);
+}
+
+input,
+textarea,
+select,
+.input-field {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 14px;
+  border: 1px solid var(--color-gray-300);
+  border-radius: 4px;
+  margin-bottom: 10px;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  border: none;
+  cursor: pointer;
+  background: none;
+}
+
+// Адаптивність
+@media (max-width: 768px) {
+  h1 {
+    font-size: 32px;
+  }
+  h2 {
+    font-size: 24px;
+  }
+  h3 {
+    font-size: 20px;
+  }
+  .kpi-card {
+    width: 100%;
+  }
+}
