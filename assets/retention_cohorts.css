@@ -1,0 +1,103 @@
+/* ========================================
+   Стилі для компонентів Retention Cohorts
+   ======================================== */
+
+:root {
+  /* Перехідні ефекти */
+  --transition-fast: 0.2s ease-in-out;
+  /* Основні кольори */
+  --color-bg: #f9f9fb;
+  --color-panel: #ffffff;
+  --color-primary: #556b2f;
+  --color-secondary: #43711f;
+  --color-accent: #1f77b4;
+  --color-text: #333333;
+  --border-radius: 8px;
+}
+
+/* Контейнер для всієї секції */
+#cohort-container {
+  background-color: var(--color-bg);
+  padding: 1.5rem;
+  border-radius: var(--border-radius);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  margin-bottom: 2rem;
+}
+
+/* Панель керування */
+.cohort-controls {
+  background-color: var(--color-panel);
+  padding: 1rem 1.5rem;
+  border: 1px solid #ddd;
+  border-radius: var(--border-radius);
+  margin-bottom: 1.5rem;
+}
+
+/* Підписи */
+.cohort-controls label {
+  font-weight: 600;
+  color: var(--color-text);
+  margin-top: 1rem;
+  display: block;
+}
+
+/* Ползунок */
+.cohort-controls .rc-slider-rail {
+  background-color: #eee;
+  height: 6px;
+}
+.cohort-controls .rc-slider-track {
+  background-color: var(--color-accent);
+  height: 6px;
+}
+.cohort-controls .rc-slider-handle {
+  border: 2px solid var(--color-primary);
+  background-color: #ffffff;
+}
+
+/* Поле вводу */
+.cohort-input {
+  width: 6rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: var(--border-radius);
+  font-size: 1rem;
+  margin-top: 0.5rem;
+  transition: border-color var(--transition-fast);
+}
+.cohort-input:focus {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+/* Контейнер під графік */
+.cohort-heatmap-container {
+  position: relative;
+  width: 100%;
+  height: 600px;
+}
+
+/* Заголовок */
+.cohort-section-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+/* Текст всередині теплової карти */
+.plotly-graph-div .heatmap text {
+  font-size: 0.85rem !important;
+  fill: var(--color-text) !important;
+}
+
+/* Адаптивність */
+@media (max-width: 768px) {
+  #cohort-container {
+    padding: 1rem;
+  }
+  .cohort-heatmap-container {
+    height: 400px;
+  }
+}
