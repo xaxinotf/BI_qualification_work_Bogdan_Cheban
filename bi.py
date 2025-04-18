@@ -74,6 +74,7 @@ donation_stats = donation_stats.merge(
     users_df[["id", "duration_on_platform", "user_role"]],
     left_on="user_id", right_on="id", how="left"
 )
+
 # Кореляційні розрахунки
 corr_value = donation_stats["duration_on_platform"].corr(donation_stats["total_donations"])
 numeric_cols = donation_stats.select_dtypes(include=[np.number]).columns
@@ -148,6 +149,27 @@ def calculate_kpi_info(targets):
 
 kpi_info = calculate_kpi_info(default_kpi_targets)
 
+# ---------------------- Динамічне порівняння поточного/попереднього місяця ----------------------
+# Готуємо щомісячні дані
+orders_monthly = liqpay_orders_df.copy()
+orders_monthly["month"] = orders_monthly["create_date"].dt.to_period("M").dt.to_timestamp()
+monthly_summary = orders_monthly.groupby("month").agg(
+    total=("amount","sum"),
+    unique_donors=("user_id","nunique"),
+    avg_donation=("amount","mean")
+).sort_index()
+
+if len(monthly_summary) >= 2:
+    curr_m, prev_m = monthly_summary.index[-1], monthly_summary.index[-2]
+    curr_vals = monthly_summary.loc[curr_m]
+    prev_vals = monthly_summary.loc[prev_m]
+else:
+    curr_m = prev_m = None
+    curr_vals = prev_vals = pd.Series({"total":0,"unique_donors":0,"avg_donation":0})
+
+delta_vals = curr_vals - prev_vals
+delta_pct = (delta_vals / prev_vals.replace({0:np.nan}) * 100).fillna(0)
+
 # ---------------------- Сегментація донорів (K‑Means) ----------------------
 X = donation_stats[["duration_on_platform", "total_donations"]].fillna(0)
 kmeans = KMeans(n_clusters=4, random_state=42)
@@ -158,8 +180,7 @@ chart_config_default = {"height": 600, "width": 1200}
 heatmap_config = {"height": 600, "width": 1200, "title": "Кореляційна матриця числових показників"}
 hist_reg_config = {"height": 600, "width": 1200, "title": "Розподіл часу перебування (дні)"}
 scatter_config = {
-    "height": 600,
-    "width": 1200,
+    "height": 600, "width": 1200,
     "title": "Середній внесок vs. Тривалість перебування",
     "labels": {"duration_on_platform": "Тривалість (днів)", "avg_donation_user": "Середній внесок"}
 }
@@ -186,7 +207,21 @@ fig_avg_donation_month = px.bar(monthly_avg, x="month", y="amount", **bar_config
 orders_by_day = liqpay_orders_df.groupby(liqpay_orders_df["create_date"].dt.date)["amount"].sum().reset_index()
 fig_line = px.line(orders_by_day, x="create_date", y="amount", **line_config)
 
-# підготовка таблиці повороту (pivot) для Dash DataTable
+# ---------------------- Прогнозування з Prophet ----------------------
+ts_df = liqpay_orders_df.groupby(liqpay_orders_df["create_date"].dt.date)["amount"].sum().reset_index()
+ts_df.columns = ["ds", "y"]
+ts_df["ds"] = pd.to_datetime(ts_df["ds"])
+
+def forecast_donations(horizon_days: int) -> go.Figure:
+    model = Prophet(daily_seasonality=True)
+    model.fit(ts_df)
+    future = model.make_future_dataframe(periods=horizon_days)
+    forecast = model.predict(future)
+    fig = plot_plotly(model, forecast)
+    fig.update_layout(title=f"Прогноз внесків на {horizon_days} днів", **chart_config_default)
+    return fig
+
+# ---------------------- Pivot‑таблиця для DataTable ----------------------
 donation_stats["duration_bin"] = pd.cut(donation_stats["duration_on_platform"], bins=10)
 pivot_table = donation_stats.pivot_table(
     index="user_role", columns="duration_bin", values="total_donations",
@@ -285,7 +320,7 @@ def create_star_schema_cytoscape():
 
 cyto_elements = create_star_schema_cytoscape()
 
-# ---------------------- KPI Cards тa Controls ----------------------
+# ---------------------- KPI Cards та Controls ----------------------
 def create_kpi_div(kpi_info):
     kpi_divs = []
     for kpi in kpi_info:
@@ -349,7 +384,8 @@ kpi_controls = html.Div([
 app = dash.Dash(
     __name__,
     suppress_callback_exceptions=True,
-    external_stylesheets=[dbc.themes.BOOTSTRAP, "https://fonts.googleapis.com/css?family=Montserrat:400,600&display=swap"]
+    external_stylesheets=[dbc.themes.BOOTSTRAP,
+                          "https://fonts.googleapis.com/css?family=Montserrat:400,600&display=swap"]
 )
 
 app.layout = html.Div(className="container-fluid", children=[
@@ -460,18 +496,24 @@ def render_tab_content(tab_value):
             html.Div(id="forecast-output", className="mt-4")
         ], className="tab-content")
     elif tab_value == "tab-kpi":
+        # Блок порівняння поточного/попереднього місяця
+        comparison_cards = html.Div([
+            html.Div([
+                html.H4(f"{prev_m.strftime('%Y-%m') if prev_m else '—'}"),
+                html.P(f"Сума: {prev_vals['total']:.2f}")
+            ], className="period-card"),
+            html.Div([
+                html.H4(f"{curr_m.strftime('%Y-%m') if curr_m else '—'}"),
+                html.P(f"Сума: {curr_vals['total']:.2f}"),
+                html.P(f"{'+' if delta_vals['total']>=0 else ''}{delta_vals['total']:.2f} ({'+' if delta_pct['total']>=0 else ''}{delta_pct['total']:.1f}%) vs минулий місяць", className="delta-text")
+            ], className="period-card")
+        ], className="period-comparison d-flex justify-content-between mb-4")
+
         return html.Div([
+            html.H2("KPI: поточний місяць vs попередній"),
+            comparison_cards,
             kpi_controls,
-            html.Div(id="kpi-div-updated",
-                     children=[html.H2("Ключові показники (KPI)"), kpi_div]),
-            html.Div([html.H2("Історія KPI"), dcc.Graph(id="kpi-history", figure=px.line(
-                pd.DataFrame({
-                    "Дата": sorted([datetime.today() - timedelta(days=i) for i in range(30)]),
-                    "Сукупна сума внесків": np.cumsum(np.random.randint(1000, 5000, size=30))
-                }),
-                x="Дата", y="Сукупна сума внесків",
-                labels={"Сукупна сума внесків": "Сума внесків", "Дата": "Дата"}
-            ).update_layout(**chart_config_default))])
+            html.Div(id="kpi-div-updated", children=[html.H2("Ключові показники (KPI)"), kpi_div])
         ], className="tab-content")
     elif tab_value == "tab-requests":
         return html.Div([
@@ -570,8 +612,7 @@ def update_main_analytics(selected_roles, reg_duration_range):
     )
     fig1.update_layout(**chart_config_default)
 
-    liqpay_orders_df["month"] = liqpay_orders_df["create_date"].dt.to_period("M").dt.to_timestamp()
-    monthly_avg2 = liqpay_orders_df.groupby("month")["amount"].mean().reset_index()
+    monthly_avg2 = orders_monthly.groupby("month")["amount"].mean().reset_index()
     fig2 = px.bar(
         monthly_avg2, x="month", y="amount",
         title="Середній внесок по місяцях",
@@ -732,7 +773,7 @@ def update_product_chart(metric, topic):
     fig.update_layout(**chart_config_default)
     return fig
 
-# ---------------------- Callback для Retention Cohorts ----------------------
+# Callback для Retention Cohorts
 @app.callback(
     [Output("cohort-heatmap", "figure"),
      Output("cohort-sizes",   "figure")],
@@ -742,8 +783,9 @@ def update_product_chart(metric, topic):
 def update_cohort_charts(max_months, min_users):
     return (
         make_cohort_figure(liqpay_orders_df, max_months, min_users),
-        make_cohort_size_figure(liqpay_orders_df,     min_users)
+        make_cohort_size_figure(liqpay_orders_df, min_users)
     )
+
 # ---------------------- Запуск ----------------------
 if __name__ == "__main__":
     app.run(debug=True)
