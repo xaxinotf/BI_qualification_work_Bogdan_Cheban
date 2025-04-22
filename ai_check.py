@@ -81,72 +81,53 @@ perc_churn = user_feats["churn_pred"].mean() * 100
 avg_next = user_feats["next_best_amount"].mean()
 
 # ==================================================================
-# Створення графіків за замовчуванням з українськими підписами
+# Функція створення графіків за замовчуванням з українськими підписами
 # ==================================================================
 def create_default_figures():
-    # ROC крива — чутливість vs специфічність
     fpr, tpr, _ = roc_curve(yc_test, clf.predict_proba(Xc_test)[:,1])
     roc_fig = go.Figure(go.Scatter(x=fpr, y=tpr, mode='lines', line_color=OLIVE))
     roc_fig.update_layout(
-        title=f"Крива ROC (AUC={roc_auc_score(yc_test, clf.predict_proba(Xc_test)[:,1]):.2f})",  # ROC curve
-        xaxis_title='Частка хибних спрацьовувань (False Positives)',
-        yaxis_title='Чутливість (True Positives)',
-        template=TEMPLATE
+        title=f"Крива ROC (AUC={roc_auc_score(yc_test, clf.predict_proba(Xc_test)[:,1]):.2f})",
+        xaxis_title='Частка хибних спрацьовувань', yaxis_title='Чутливість', template=TEMPLATE
     )
-    # Важливість характеристик
     fi_fig = px.bar(
         x=FEATURES, y=clf.feature_importances_,
-        labels={'x':'Характеристика', 'y':'Вага характеристики'},
-        title='Важливість характеристик моделі відтоку',
-        color_discrete_sequence=[OLIVE], template=TEMPLATE
+        labels={'x':'Характеристика','y':'Вага характеристики'},
+        title='Важливість характеристик моделі відтоку', color_discrete_sequence=[OLIVE], template=TEMPLATE
     )
-    # Гістограма рекомендацій сум
     hist_fig = px.histogram(
         user_feats, x="next_best_amount", nbins=20,
         title="Розподіл рекомендованих сум для наступного донату",
-        labels={'next_best_amount':'Сума (грн)'},
-        color_discrete_sequence=[OLIVE_LIGHT], template=TEMPLATE
+        labels={'next_best_amount':'Сума (грн)'}, color_discrete_sequence=[OLIVE_LIGHT], template=TEMPLATE
     )
-    # Scatter: ймовірність відтоку vs рекомендована сума
     scatter_fig = px.scatter(
         user_feats, x="churn_proba", y="next_best_amount",
         color="churn_pred", symbol="churn_pred",
-        labels={
-            'churn_proba':'Ймовірність відтоку',
-            'next_best_amount':'Рекомендована сума (грн)',
-            'churn_pred':'Прогноз відтоку'
-        },
-        title="Ймовірність відтоку vs Рекомендована сума",
-        color_discrete_sequence=[OLIVE], template=TEMPLATE
+        labels={'churn_proba':'Ймовірність відтоку','next_best_amount':'Рекомендована сума (грн)'},
+        title="Ймовірність відтоку vs Рекомендована сума", color_discrete_sequence=[OLIVE], template=TEMPLATE
     )
-    # Boxplot: порівняння сум за статусом відтоку
     box_fig = px.box(
         user_feats, x="churn_pred", y="next_best_amount",
         labels={'churn_pred':'Прогноз відтоку','next_best_amount':'Рекомендована сума (грн)'},
-        title="Порівняння рекомендованих сум для тих, хто/не відтік",
+        title="Порівняння рекомендованих сум: відтік vs не відтік",
         color_discrete_sequence=[OLIVE_LIGHT, OLIVE], template=TEMPLATE
     )
-    # Гістограма часу з останнього донату
     rec_hist = px.histogram(
         user_feats, x='recency', nbins=20,
         labels={'recency':'Дні з останнього донату'},
-        title='Розподіл часу від останнього донату у днях',
-        color_discrete_sequence=[OLIVE], template=TEMPLATE
+        title='Розподіл часу від останнього донату', color_discrete_sequence=[OLIVE], template=TEMPLATE
     )
-    # Top 10 найбільших рекомендацій
     top10_fig = px.bar(
-        user_feats.nlargest(10,'next_best_amount'),
-        x='user_id', y='next_best_amount',
-        labels={'user_id':'ID користувача','next_best_amount':'Рекомендована сума (грн)'},
-        title='Top 10 користувачів за рекомендованою сумою',
-        color_discrete_sequence=[OLIVE], template=TEMPLATE
+        user_feats.nlargest(10,'next_best_amount'), x='user_id', y='next_best_amount',
+        labels={'user_id':'ID користувача','next_best_amount':'Сума (грн)'},
+        title='Топ 10 користувачів за рекомендованою сумою', color_discrete_sequence=[OLIVE], template=TEMPLATE
     )
     return roc_fig, fi_fig, hist_fig, scatter_fig, box_fig, rec_hist, top10_fig
 
 roc_default, fi_default, nb_default, scatter_default, box_default, recency_default, top10_default = create_default_figures()
 
 # ==================================================================
-# Інтерфейс вкладки з українськими підписами
+# Інтерфейс вкладки з українськими підписами та коротким описом графіків
 # ==================================================================
 def render_churn_tab():
     min_date = user_feats['last_date'].min().date()
@@ -167,16 +148,13 @@ def render_churn_tab():
                 dcc.DatePickerRange(id='date-range', start_date=min_date, end_date=max_date, display_format='YYYY-MM-DD'),
                 html.Br(), html.Br(),
                 html.Label("Ймовірність відтоку >=:"),
-                dcc.Slider(id="churn-proba-slider", min=0, max=1, step=0.01, value=0.5,
-                           marks={i/10:f"{i*10}%" for i in range(11)}),
+                dcc.Slider(id="churn-proba-slider", min=0, max=1, step=0.01, value=0.5, marks={i/10:f"{i*10}%" for i in range(11)}),
                 html.Br(),
                 html.Label("Рекомендована сума >= (грн):"),
                 dcc.Input(id="amount-threshold", type="number", value=0, placeholder="від"),
                 html.Br(), html.Br(),
                 html.Label("Статус відтоку:"),
-                dcc.RadioItems(id="churn-pred-filter",
-                               options=[{'label':'Усі','value':'all'},{'label':'Відтік','value':1},{'label':'Не відтік','value':0}],
-                               value='all', inline=True)
+                dcc.RadioItems(id="churn-pred-filter", options=[{'label':'Усі','value':'all'},{'label':'Відтік','value':1},{'label':'Не відтік','value':0}], value='all', inline=True)
             ])
         ], color='light', className="mb-4"),
 
@@ -189,10 +167,10 @@ def render_churn_tab():
         # Додаткові графіки
         dbc.Row([
             dbc.Col(dbc.Card([dbc.CardHeader("Гістограма рекомендованих сум"), dbc.CardBody(dcc.Graph(id="churn-proba-hist", figure=nb_default))], color='light'), width=6),
-            dbc.Col(dbc.Card([dbc.CardHeader("Ймовірність відтоку vs Сума"), dbc.CardBody(dcc.Graph(id="churn-scatter", figure=scatter_default))], color='light'), width=6)
+            dbc.Col(dbc.Card([dbc.CardHeader("Ймовірність відтоку vs Рекомендована сума"), dbc.CardBody(dcc.Graph(id="churn-scatter", figure=scatter_default))], color='light'), width=6)
         ], className="mb-4"),
         dbc.Row([
-            dbc.Col(dbc.Card([dbc.CardHeader("Розподіл рекомендованих сум за статусом відтоку"), dbc.CardBody(dcc.Graph(id='churn-box', figure=box_default))], color='light'), width=6),
+            dbc.Col(dbc.Card([dbc.CardHeader("Boxplot рекомендацій за статусом відтоку"), dbc.CardBody(dcc.Graph(id='churn-box', figure=box_default))], color='light'), width=6),
             dbc.Col(dbc.Card([dbc.CardHeader("Розподіл часу з останнього донату"), dbc.CardBody(dcc.Graph(id='recency-hist', figure=recency_default))], color='light'), width=6)
         ], className="mb-4"),
 
@@ -209,6 +187,21 @@ def render_churn_tab():
             style_table={'overflowX':'auto'}, style_header={'backgroundColor':OLIVE,'color':'#fff'}, style_cell={'textAlign':'center','padding':'5px'},
             style_data_conditional=[{'if':{'row_index':'odd'},'backgroundColor':'#f9f9f9'},{'if':{'filter_query':'{churn_pred} = 1'},'backgroundColor':'#ffe6e6'}]
         ), width=12)),
+
+        # Опис графіків
+        dbc.Row(dbc.Col(html.Div([
+            html.H5("Опис візуалізацій:"),
+            html.Ul([
+                html.Li(html.B("Крива ROC:"), " показує здатність моделі відтоку розрізняти між класами (чутливість vs специфічність)."),
+                html.Li(html.B("Важливість характеристик:"), " відображає, які фічі (середній донат, recency, частота) найбільше впливають на прогноз відтоку."),
+                html.Li(html.B("Гістограма рекомендованих сум:"), " показує розподіл суми, яку модель рекомендує для наступного донату."),
+                html.Li(html.B("Ймовірність відтоку vs Рекомендована сума:"), " досліджує зв'язок між ймовірністю відтоку та розміром рекомендації."),
+                html.Li(html.B("Boxplot рекомендацій за статусом відтоку:"), " порівнює рекомендовані суми для користувачів, яких модель позначила як відтік vs не відтік."),
+                html.Li(html.B("Розподіл часу з останнього донату:"), " показує, скільки днів минуло з останнього донату для кожного користувача."),
+                html.Li(html.B("Top 10 користувачів за рекомендованою сумою:"), " виводить найвищі рекомендації сум для топ-10 користувачів.")
+            ])
+        ], style={'padding':'15px', 'backgroundColor':'#f8f9fa', 'borderRadius':'5px'}), width=12)),
+
     ], fluid=True)
 
 # Callbacks
@@ -219,19 +212,13 @@ def register_churn_callbacks(app: dash.Dash):
         [Input("date-range","start_date"), Input("date-range","end_date"), Input("churn-proba-slider","value"), Input("amount-threshold","value"), Input("churn-pred-filter","value")]
     )
     def update_charts(start_date, end_date, thresh, amt_thresh, pred_filter):
-        # Фільтрація даних за датою, ймовірністю і сумою
         df = user_feats.copy()
         df = df[(df['last_date'] >= pd.to_datetime(start_date)) & (df['last_date'] <= pd.to_datetime(end_date))]
-        df = df[df["churn_proba"] >= thresh]
-        df = df[df["next_best_amount"] >= amt_thresh]
-        if pred_filter in (0,1):
-            df = df[df["churn_pred"] == pred_filter]
-
-        # Якщо немає даних, повертаємо дефолтні графіки і порожню таблицю
+        df = df[df["churn_proba"]>=thresh]
+        df = df[df["next_best_amount"]>=amt_thresh]
+        if pred_filter in (0,1): df = df[df["churn_pred"]==pred_filter]
         if df.empty:
             return roc_default, fi_default, nb_default, scatter_default, box_default, recency_default, [], top10_default
-
-        # ROC: тільки якщо обидва класи присутні
         if df['churn'].nunique() < 2:
             roc = go.Figure()
             roc.add_annotation(text="Недостатньо даних для побудови ROC", xref="paper", yref="paper", showarrow=False)
@@ -240,20 +227,12 @@ def register_churn_callbacks(app: dash.Dash):
             vals = roc_curve(df['churn'], clf.predict_proba(df[FEATURES])[:,1])
             roc = go.Figure(go.Scatter(x=vals[0], y=vals[1], mode='lines', line_color=OLIVE))
             roc.update_layout(title="Крива ROC", xaxis_title='Частка хибних спрацьовувань', yaxis_title='Чутливість', template=TEMPLATE)
-
-        # Важливість характеристик — модель статична
         fi = fi_default
-        # Гістограма рекомендованих сум
         hist = px.histogram(df, x="next_best_amount", nbins=20, labels={'next_best_amount':'Сума (грн)'}, title="Гістограма рекомендованих сум", color_discrete_sequence=[OLIVE_LIGHT], template=TEMPLATE)
-        # Scatter: ймовірність відтоку vs рекомендована сума
-        scat = px.scatter(df, x="churn_proba", y="next_best_amount", color="churn_pred", symbol="churn_pred", labels={'churn_proba':'Ймовірність відтоку','next_best_amount':'Сума (грн)','churn_pred':'Прогноз відтоку'}, title="Ймовірність відтоку vs Сума", color_discrete_sequence=[OLIVE], template=TEMPLATE)
-        # Boxplot рекомендацій за статусом відтоку
-        box = px.box(df, x="churn_pred", y="next_best_amount", labels={'churn_pred':'Прогноз відтоку','next_best_amount':'Сума (грн)'}, title="Порівняння рекомендованих сум для тих, хто/не відтік", color_discrete_sequence=[OLIVE_LIGHT, OLIVE], template=TEMPLATE)
-        # Гістограма recency
-        rec = px.histogram(df, x='recency', nbins=20, labels={'recency':'Дні з останнього донату'}, title='Розподіл часу від останнього донату у днях', color_discrete_sequence=[OLIVE], template=TEMPLATE)
-        # Top10 рекомендацій
-        top10 = px.bar(df.nlargest(10,'next_best_amount'), x='user_id', y='next_best_amount', labels={'user_id':'ID користувача','next_best_amount':'Сума (грн)'}, title='Top 10 користувачів за сумою', color_discrete_sequence=[OLIVE], template=TEMPLATE)
-        # Дані для таблиці
+        scat = px.scatter(df, x="churn_proba", y="next_best_amount", color="churn_pred", symbol="churn_pred", labels={'churn_proba':'Ймовірність відтоку','next_best_amount':'Сума (грн)','churn_pred':'Прогноз відтоку'}, title="Ймовірність відтоку vs Рекомендована сума", color_discrete_sequence=[OLIVE], template=TEMPLATE)
+        box = px.box(df, x="churn_pred", y="next_best_amount", labels={'churn_pred':'Прогноз відтоку','next_best_amount':'Сума (грн)'}, title="Порівняння рекомендованих сум: відтік vs не відтік", color_discrete_sequence=[OLIVE_LIGHT, OLIVE], template=TEMPLATE)
+        rec = px.histogram(df, x='recency', nbins=20, labels={'recency':'Дні з останнього донату'}, title='Розподіл часу від останнього донату', color_discrete_sequence=[OLIVE], template=TEMPLATE)
+        top10 = px.bar(df.nlargest(10,'next_best_amount'), x='user_id', y='next_best_amount', labels={'user_id':'ID користувача','next_best_amount':'Сума (грн)'}, title='Топ 10 користувачів за рекомендованою сумою', color_discrete_sequence=[OLIVE], template=TEMPLATE)
         data = df[["user_id","last_date","churn_proba","churn_pred","next_best_amount"]].to_dict('records')
         return roc, fi, hist, scat, box, rec, data, top10
 
