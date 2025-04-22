@@ -34,6 +34,8 @@ import dash_cytoscape as cyto
 # імпорт модуля для Retention Cohorts
 from retention_cohorts import get_cohort_controls, make_cohort_figure, make_cohort_size_figure
 
+import ai_check
+
 # ==================================================================
 # Функція завантаження даних (підтримка Dask та PySpark)
 # ==================================================================
@@ -408,6 +410,7 @@ app.layout = html.Div(className="container-fluid", children=[
                     dcc.Tab(label="Волонтерський аналіз", value="tab-volunteers"),
                     dcc.Tab(label="Аналіз зборів", value="tab-levy"),
                     dcc.Tab(label="Retention Cohorts", value="tab-cohorts"),
+                    dcc.Tab(label="Churn Prediction", value="tab-churn"),
                 ]
             )
         ]),
@@ -585,6 +588,8 @@ def render_tab_content(tab_value):
             dcc.Graph(id="cohort-heatmap", figure=make_cohort_figure(liqpay_orders_df, 12, 5)),
             dcc.Graph(id="cohort-sizes", figure=make_cohort_size_figure(liqpay_orders_df, 5))
         ], className="tab-content")
+    elif tab_value=="tab-churn":
+        return ai_check.render_churn_tab()
     else:
         return html.Div("Виберіть пункт меню.", className="tab-content")
 
@@ -785,6 +790,9 @@ def update_cohort_charts(max_months, min_users):
         make_cohort_figure(liqpay_orders_df, max_months, min_users),
         make_cohort_size_figure(liqpay_orders_df, min_users)
     )
+
+# ---------------------- Реєстрація колбеків Churn Prediction ----------------------
+ai_check.register_churn_callbacks(app)
 
 # ---------------------- Запуск ----------------------
 if __name__ == "__main__":
