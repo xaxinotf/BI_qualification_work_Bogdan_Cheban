@@ -12,9 +12,7 @@ import dash
 import dash_bootstrap_components as dbc
 from dash import dcc, html, dash_table, Input, Output, State, callback_context
 
-# ==================================================================
-# Стилі та палітра
-# ==================================================================
+
 OLIVE = '#556b2f'
 OLIVE_LIGHT = '#829661'
 TEMPLATE = 'plotly_white'
