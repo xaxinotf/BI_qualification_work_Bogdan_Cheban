@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 
+import guide
+
 import plotly.express as px
 import plotly.graph_objects as go
 from prophet import Prophet
@@ -391,6 +393,7 @@ app = dash.Dash(
 )
 
 app.layout = html.Div(className="container-fluid", children=[
+    guide.GUIDE_LAYOUT,
     html.Div(className="row", children=[
         html.Div(className="col-md-3 sidebar", children=[
             html.H2("Меню", className="text-center text-success"),
@@ -793,6 +796,9 @@ def update_cohort_charts(max_months, min_users):
 
 # ---------------------- Реєстрація колбеків Churn Prediction ----------------------
 ai_check.register_churn_callbacks(app)
+
+# --- Реєструємо колбеки гіда
+guide.register_guide(app)  # ← додано
 
 # ---------------------- Запуск ----------------------
 if __name__ == "__main__":
