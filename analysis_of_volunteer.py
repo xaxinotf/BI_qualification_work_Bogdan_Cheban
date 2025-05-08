@@ -6,7 +6,7 @@ from datetime import datetime
 import plotly.express as px
 from sklearn.cluster import KMeans
 
-# NLTK для аналізу сентименту та обробки тексту
+#NLTK для аналізу сентименту та обробки тексту
 import nltk
 from nltk.sentiment import SentimentIntensityAnalyzer
 from nltk.corpus import stopwords
@@ -18,12 +18,6 @@ stop_words = set(stopwords.words("english"))
 
 
 class VolunteerAnalysis:
-    """
-    Клас для аналізу волонтерської діяльності та репутації.
-    Завантажує дані з файлів volunteer.csv та volunteer_feedback.csv,
-    проводить агрегування фідбеків, розрахунок сентименту, кластеризацію
-    та тематичний аналіз текстів.
-    """
 
     def __init__(self, data_dir="data"):
         self.data_dir = data_dir
@@ -35,12 +29,12 @@ class VolunteerAnalysis:
         return pd.read_csv(path)
 
     def compute_volunteer_analysis(self):
-        """Обчислює агреговані показники для кожного волонтера та кластеризує дані."""
+        """обчислює агреговані показники для кожного волонтера та кластеризує дані"""
         feedback_agg = self.volunteer_feedback_df.groupby("volunteer_id").agg(
             average_reputation=("reputation_score", "mean"),
             feedback_count=("id", "count")
         ).reset_index()
-        # Розрахунок сентименту
+        # розрахунок сентименту
         self.volunteer_feedback_df["sentiment"] = self.volunteer_feedback_df["text"].apply(
             lambda x: sia.polarity_scores(x)["compound"]
         )
@@ -57,7 +51,7 @@ class VolunteerAnalysis:
         return vol_analysis
 
     def thematic_analysis_feedback(self):
-        """Проводить тематичний аналіз текстів фідбеків: повертає топ-10 ключових слів."""
+        """проводить тематичний аналіз текстів фідбеків: повертає топ-10 ключових слів(можливе розширення)"""
 
         def extract_words(text):
             text = re.sub(r"[^\w\s]", "", text.lower())
@@ -72,18 +66,13 @@ class VolunteerAnalysis:
         return top_words
 
     def create_plots(self, cluster_chart_config=None, topwords_chart_config=None):
-        """
-        Створює графіки для аналізу волонтерів.
-        :param cluster_chart_config: Словник для налаштування layout scatter-графіка
-        :param topwords_chart_config: Словник для налаштування layout бар-графіка
-        :return: (fig_scatter, fig_topwords)
-        """
+
         if not hasattr(self, "volunteer_analysis"):
             self.compute_volunteer_analysis()
         if not hasattr(self, "top_words"):
             self.thematic_analysis_feedback()
 
-        # Scatter-графік для кластеризації волонтерів
+        # scatter-графік для кластеризації волонтерів
         fig_scatter = px.scatter(
             self.volunteer_analysis,
             x="average_reputation",
@@ -98,7 +87,7 @@ class VolunteerAnalysis:
         else:
             fig_scatter.update_layout(height=600, width=1200)
 
-        # Бар-графік для тематичного аналізу (вже встановлено орієнтацію горизонтально)
+        # бар-графік для тематичного аналізу (вже встановлено орієнтацію горизонтально)
         fig_topwords = px.bar(
             self.top_words,
             x="кількість",
@@ -107,7 +96,7 @@ class VolunteerAnalysis:
             title="Топ-10 ключових слів у відгуках волонтерів"
         )
         if topwords_chart_config:
-            # Видаляємо параметр 'orientation', якщо він присутній, щоб уникнути помилки
+            # видаляємо параметр 'orientation', якщо він присутній, щоб уникнути помилки(тепер вже немає помилки)
             tc = topwords_chart_config.copy()
             tc.pop("orientation", None)
             fig_topwords.update_layout(**tc)
@@ -117,7 +106,6 @@ class VolunteerAnalysis:
         return fig_scatter, fig_topwords
 
     def run(self):
-        """Запускає аналіз і зберігає результати у файли."""
         self.compute_volunteer_analysis()
         self.thematic_analysis_feedback()
         fig_scatter, fig_topwords = self.create_plots()

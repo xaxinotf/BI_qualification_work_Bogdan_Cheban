@@ -1,4 +1,3 @@
-# bi.py
 
 import os
 import re
@@ -38,9 +37,8 @@ from retention_cohorts import get_cohort_controls, make_cohort_figure, make_coho
 
 import ai_check
 
-# ==================================================================
+
 # Функція завантаження даних (підтримка Dask та PySpark)
-# ==================================================================
 DATA_DIR = "data"
 
 def load_data(filename):
@@ -52,19 +50,19 @@ def load_data(filename):
     else:
         return pd.read_csv(path)
 
-# ---------------------- Завантаження даних ----------------------
+#завантаження даних(csv)
 users_df = load_data("user.csv")
 liqpay_orders_df = load_data("liqpay_order.csv")
 requests_df = load_data("request.csv")
 military_personnel_df = load_data("military_personnel.csv")
 brigade_df = load_data("brigade.csv")
 
-# ---------------------- Підготовка та обробка ----------------------
+#підготовка та обробка (щоб не було помилок)
 users_df["registration_date"] = pd.to_datetime(users_df["create_date"], errors="coerce")
 users_df["duration_on_platform"] = (datetime.today() - users_df["registration_date"]).dt.days
 liqpay_orders_df["create_date"] = pd.to_datetime(liqpay_orders_df["create_date"], errors="coerce")
 
-# Злиття для донатної статистики
+#злиття для донатної статистики
 donations = liqpay_orders_df.merge(
     users_df[["id", "duration_on_platform", "user_role"]],
     left_on="user_id", right_on="id", how="left"
@@ -79,12 +77,12 @@ donation_stats = donation_stats.merge(
     left_on="user_id", right_on="id", how="left"
 )
 
-# Кореляційні розрахунки
+#кореляційні розрахунки
 corr_value = donation_stats["duration_on_platform"].corr(donation_stats["total_donations"])
 numeric_cols = donation_stats.select_dtypes(include=[np.number]).columns
 corr_matrix = donation_stats[numeric_cols].corr()
 
-# ---------------------- KPI розрахунки ----------------------
+# фактичні KPI розрахунки
 total_donations = donation_stats["total_donations"].sum()
 avg_donation = donation_stats["total_donations"].mean()
 unique_donors = liqpay_orders_df["user_id"].nunique()
@@ -153,8 +151,9 @@ def calculate_kpi_info(targets):
 
 kpi_info = calculate_kpi_info(default_kpi_targets)
 
-# ---------------------- Динамічне порівняння поточного/попереднього місяця ----------------------
-# Готуємо щомісячні дані
+#--динамічне порівняння поточного/попереднього місяця--
+
+#готуємо щомісячні дані
 orders_monthly = liqpay_orders_df.copy()
 orders_monthly["month"] = orders_monthly["create_date"].dt.to_period("M").dt.to_timestamp()
 monthly_summary = orders_monthly.groupby("month").agg(
@@ -174,12 +173,12 @@ else:
 delta_vals = curr_vals - prev_vals
 delta_pct = (delta_vals / prev_vals.replace({0:np.nan}) * 100).fillna(0)
 
-# ---------------------- Сегментація донорів (K‑Means) ----------------------
+# сегментація донорів (K‑Means)
 X = donation_stats[["duration_on_platform", "total_donations"]].fillna(0)
 kmeans = KMeans(n_clusters=4, random_state=42)
 donation_stats["cluster"] = kmeans.fit_predict(X)
 
-# ---------------------- Конфігурація діаграм ----------------------
+#конфігурація діаграм
 chart_config_default = {"height": 600, "width": 1200}
 heatmap_config = {"height": 600, "width": 1200, "title": "Кореляційна матриця числових показників"}
 hist_reg_config = {"height": 600, "width": 1200, "title": "Розподіл часу перебування (дні)"}
@@ -191,7 +190,7 @@ scatter_config = {
 bar_config = {"height": 600, "width": 1200, "title": "Середній внесок по місяцях", "labels": {"month": "Місяць", "amount": "Середній внесок"}}
 line_config = {"height": 600, "width": 1200, "title": "Сукупна сума внесків по днях", "labels": {"create_date": "Дата", "amount": "Сума внесків"}}
 
-# побудова базових фігур
+#побудова базових фігур
 fig_heatmap = px.imshow(corr_matrix, text_auto=True, **heatmap_config)
 fig_heatmap.update_xaxes(title_text="Показники")
 fig_heatmap.update_yaxes(title_text="Показники")
@@ -211,7 +210,7 @@ fig_avg_donation_month = px.bar(monthly_avg, x="month", y="amount", **bar_config
 orders_by_day = liqpay_orders_df.groupby(liqpay_orders_df["create_date"].dt.date)["amount"].sum().reset_index()
 fig_line = px.line(orders_by_day, x="create_date", y="amount", **line_config)
 
-# ---------------------- Прогнозування з Prophet ----------------------
+#прогнозування з бібліотекою Prophet
 ts_df = liqpay_orders_df.groupby(liqpay_orders_df["create_date"].dt.date)["amount"].sum().reset_index()
 ts_df.columns = ["ds", "y"]
 ts_df["ds"] = pd.to_datetime(ts_df["ds"])
@@ -225,7 +224,7 @@ def forecast_donations(horizon_days: int) -> go.Figure:
     fig.update_layout(title=f"Прогноз внесків на {horizon_days} днів", **chart_config_default)
     return fig
 
-# ---------------------- Pivot‑таблиця для DataTable ----------------------
+#pivot‑таблиця для DataTable
 donation_stats["duration_bin"] = pd.cut(donation_stats["duration_on_platform"], bins=10)
 pivot_table = donation_stats.pivot_table(
     index="user_role", columns="duration_bin", values="total_donations",
@@ -243,7 +242,7 @@ pivot_table_div = dash_table.DataTable(
     style_data_conditional=[{"if": {"row_index": "odd"}, "backgroundColor": "#f3f3f3"}]
 )
 
-# ---------------------- Аналіз запитів за бригадами ----------------------
+#аналіз запитів за бригадами
 military_personnel_df = military_personnel_df.rename(columns={"id": "mp_id"})
 brigade_df = brigade_df.rename(columns={"id": "brigade_id"})
 requests_merged = requests_df.merge(
@@ -263,7 +262,7 @@ fig_requests_by_brigade = px.bar(
 )
 fig_requests_by_brigade.update_layout(**chart_config_default)
 
-# ---------------------- Аналіз товарів ----------------------
+#аналіз товарів
 if "product" not in requests_df.columns:
     def extract_product(desc):
         m = re.search(r"'([^']+)'", desc)
@@ -295,7 +294,7 @@ product_table = dash_table.DataTable(
     style_data_conditional=[{"if": {"row_index": "odd"}, "backgroundColor": "#f3f3f3"}]
 )
 
-# ---------------------- Зіркова схема OLAP‑куба ----------------------
+#зіркова схема OLAP‑куба
 def create_star_schema_cytoscape():
     fact = "Liqpay_order"
     dimensions = [
@@ -324,7 +323,7 @@ def create_star_schema_cytoscape():
 
 cyto_elements = create_star_schema_cytoscape()
 
-# ---------------------- KPI Cards та Controls ----------------------
+#KPI Cards та Controls
 def create_kpi_div(kpi_info):
     kpi_divs = []
     for kpi in kpi_info:
@@ -384,7 +383,7 @@ kpi_controls = html.Div([
     html.Div(id="kpi-notifications", className="kpi-notification")
 ], className="kpi-controls")
 
-# ---------------------- Побудова Dash-додатку ----------------------
+#побудова Dash-додатку
 app = dash.Dash(
     __name__,
     suppress_callback_exceptions=True,
@@ -421,7 +420,9 @@ app.layout = html.Div(className="container-fluid", children=[
     ])
 ])
 
-# ---------------------- Callback перемикання вмісту ----------------------
+#-----------------------------------------------------------------------
+#----------------------callback перемикання вмісту----------------------
+
 @app.callback(
     Output("main-content", "children"),
     Input("sidebar-tabs", "value")
@@ -502,7 +503,7 @@ def render_tab_content(tab_value):
             html.Div(id="forecast-output", className="mt-4")
         ], className="tab-content")
     elif tab_value == "tab-kpi":
-        # Блок порівняння поточного/попереднього місяця
+        #блок порівняння поточного/попереднього місяця
         comparison_cards = html.Div([
             html.Div([
                 html.H4(f"{prev_m.strftime('%Y-%m') if prev_m else '—'}"),
@@ -596,9 +597,9 @@ def render_tab_content(tab_value):
     else:
         return html.Div("Виберіть пункт меню.", className="tab-content")
 
-# ---------------------- Основні Callback-и ----------------------
+#основні Callback-и
 
-# Оновлення основної аналітики
+#оновлення основної аналітики
 @app.callback(
     [Output("scatter-graph", "figure"),
      Output("hist-donations", "figure"),
@@ -639,7 +640,7 @@ def update_main_analytics(selected_roles, reg_duration_range):
 
     return fig1, fig2, fig3
 
-# Дрилл-даун для Star Schema
+#“drill down”(досліджувати далі) для Star Schema
 @app.callback(
     Output("drill-down", "children"),
     Input("star-schema", "tapNodeData")
@@ -665,7 +666,7 @@ def drill_down(nodeData):
         return dcc.Graph(figure=fig)
     return f"Вибрано: {label}. Деталі недоступні."
 
-# Кластери донорів
+#кластери донорів
 @app.callback(
     [Output("cluster-scatter", "figure"), Output("cluster-box", "figure")],
     Input("cluster-filter", "value")
@@ -687,7 +688,7 @@ def update_clusters(selected_clusters):
     fig_box.update_layout(**chart_config_default)
     return fig_sc, fig_box
 
-# Прогнозування
+#прогнозування
 @app.callback(
     Output("forecast-output", "children"),
     Input("forecast-horizon-slider", "value")
@@ -699,7 +700,7 @@ def update_forecast(horizon):
     except Exception as e:
         return html.P(f"Помилка прогнозування: {e}", style={"color": "red"})
 
-# Оновлення KPI
+#оновлення KPI
 @app.callback(
     [Output("kpi-notifications", "children"), Output("kpi-div-updated", "children")],
     Input("update-kpi-btn", "n_clicks"),
@@ -737,7 +738,7 @@ def update_kpi(n, total_t, avg_t, uniq_t, perc_t, max_t, avg_reg_t, corr_t, old)
     ], className="kpi-section")
     return msgs, content
 
-# Аналіз заявок
+#аналіз заявок
 @app.callback(
     Output("requests-analysis-graph", "figure"),
     Input("request-metric-dropdown", "value")
@@ -758,7 +759,7 @@ def update_requests_analysis(metric):
     fig.update_layout(**chart_config_default)
     return fig
 
-# Аналіз товарів
+#аналіз товарів
 @app.callback(
     Output("product-bar-chart", "figure"),
     [Input("product-metric-dropdown", "value"), Input("product-topic-filter", "value")]
@@ -781,7 +782,7 @@ def update_product_chart(metric, topic):
     fig.update_layout(**chart_config_default)
     return fig
 
-# Callback для Retention Cohorts
+#callback для Retention Cohorts (вже модифікований)
 @app.callback(
     [Output("cohort-heatmap", "figure"),
      Output("cohort-sizes",   "figure")],
@@ -794,12 +795,14 @@ def update_cohort_charts(max_months, min_users):
         make_cohort_size_figure(liqpay_orders_df, min_users)
     )
 
-# ---------------------- Реєстрація колбеків Churn Prediction ----------------------
+#---------------------- Реєстрація колбеків Churn Prediction
+#------------------------------------------------------------------
 ai_check.register_churn_callbacks(app)
 
-# --- Реєструємо колбеки гіда
-guide.register_guide(app)  # ← додано
+# #---------------------- Реєструємо колбеки гіда
+#------------------------------------------------------------------
+guide.register_guide(app)
 
-# ---------------------- Запуск ----------------------
+# Запуск нашого додатку!!!!!
 if __name__ == "__main__":
     app.run(debug=True)

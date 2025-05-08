@@ -6,20 +6,8 @@ from prophet.plot import plot_plotly
 from sklearn.cluster import KMeans
 
 
-class LevyAnalysis:
-    """
-    Клас для аналізу зборів та звітності.
-    Завантажує дані з файлів:
-      - levy.csv  (збори)
-      - report.csv (звіти)
-      - request.csv (запити, де "amount" у запиті – цільова сума)
 
-    Розраховує:
-      • Відсоток виконання зборів (ефективність = accumulated / target * 100)
-      • Кількість звітів для кожного збору
-      • Часовий тренд накопичення коштів із застосуванням Prophet
-      • Матрицю кореляції між накопиченням, ефективністю та кількістю звітів
-    """
+class LevyAnalysis:
 
     def __init__(self, data_dir="data"):
         self.data_dir = data_dir

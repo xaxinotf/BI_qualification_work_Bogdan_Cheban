@@ -9,11 +9,7 @@ def get_cohort_controls(
     id_max_periods: str = "cohort-max-periods",
     id_min_users:   str = "cohort-min-users"
 ) -> html.Div:
-    """
-    Повертає блок елементів Dash для керування побудовою когортної матриці:
-      - Ползунок для вибору максимальної кількості періодів (місяців)
-      - Ползунок для мінімального розміру когорти
-    """
+
     return html.Div(
         className="cohort-controls p-3 mb-4 border rounded bg-light",
         children=[
@@ -45,25 +41,8 @@ def make_cohort_figure(
     max_periods:    int = 12,
     min_cohort_size:int = 5
 ) -> go.Figure:
-    """
-    Створює теплову карту Retention Cohorts на основі даних по донатам.
 
-    Параметри:
-    -----------
-    df : pd.DataFrame
-        DataFrame з колонками:
-          - 'user_id'     : ідентифікатор користувача
-          - 'create_date' : дата і час донату
-    max_periods : int
-        Максимальна кількість місяців для відображення по горизонталі.
-    min_cohort_size : int
-        Мінімальна кількість користувачів у когорті для відображення.
-
-    Повертає:
-    ---------
-    go.Figure — об’єкт з тепловою картою.
-    """
-    # 1. Підготовка даних
+    #1.підготовка даних
     data = df.copy()
     data['order_date']   = pd.to_datetime(data['create_date'], errors='coerce')
     data = data.dropna(subset=['order_date'])
@@ -74,10 +53,10 @@ def make_cohort_figure(
         (data['order_period'].dt.year  - data['cohort_period'].dt.year) * 12 +
         (data['order_period'].dt.month - data['cohort_period'].dt.month)
     )
-    # Обмежуємо по max_periods
+    #обмежуємо по max_periods
     data = data[data['period_number'].between(0, max_periods)]
 
-    # 2. Агреація
+    #2.Агреація
     cohorts = (
         data
         .groupby(['cohort_period', 'period_number'])['user_id']
@@ -90,17 +69,17 @@ def make_cohort_figure(
         .fillna(0).astype(int)
     )
 
-    # 3. Фільтр за мін. розміром
+    #3.Фільтр за мін. розміром
     cohort_sizes = cohort_counts.iloc[:, 0]
     valid_cohorts = cohort_sizes[cohort_sizes >= min_cohort_size].index
     cohort_counts = cohort_counts.loc[valid_cohorts]
     cohort_sizes  = cohort_sizes.loc[valid_cohorts]
 
-    # 4. Обчислення відсотків утримання
+    #4.обчислення відсотків утримання
     retention     = cohort_counts.div(cohort_sizes, axis=0)
     retention_pct = (retention * 100).round(1)
 
-    # 5. Побудова Heatmap
+    #5.побудова Heatmap
     fig = go.Figure(
         data=go.Heatmap(
             z=retention_pct.values,
@@ -126,10 +105,6 @@ def make_cohort_size_figure(
     df: pd.DataFrame,
     min_cohort_size: int = 5
 ) -> go.Figure:
-    """
-    Створює стовпчикову діаграму розміру когорти
-    (кількість унікальних донорів у кожному місяці-початку).
-    """
     data = df.copy()
     data['order_date']   = pd.to_datetime(data['create_date'], errors='coerce')
     data = data.dropna(subset=['order_date'])

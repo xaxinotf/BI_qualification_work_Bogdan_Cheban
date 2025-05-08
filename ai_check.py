@@ -17,9 +17,9 @@ OLIVE = '#556b2f'
 OLIVE_LIGHT = '#829661'
 TEMPLATE = 'plotly_white'
 
-# ==================================================================
-# Завантаження та підготовка даних
-# ==================================================================
+
+# завантаження та підготовка даних
+
 DATA_DIR = "data"
 
 def load_data(filename: str) -> pd.DataFrame:
@@ -51,12 +51,12 @@ user_feats["frequency"] = user_feats["count"] / user_feats["months_active"]
 user_feats["churn"] = (user_feats["recency"] > 90).astype(int)
 user_feats.dropna(subset=["avg_amount","recency","frequency","last_amount"], inplace=True)
 
-# ==================================================================
-# Навчання моделей
-# ==================================================================
+
+# навчання моделей (на основі CSV)
+
 FEATURES = ["avg_amount","recency","frequency"]
 
-# Класифікація відтоку
+#класифікація відтоку
 Xc = user_feats[FEATURES]
 yc = user_feats["churn"]
 Xc_train, Xc_test, yc_train, yc_test = train_test_split(Xc, yc, test_size=0.3, random_state=42, stratify=yc)
@@ -65,7 +65,7 @@ clf.fit(Xc_train, yc_train)
 user_feats["churn_proba"] = clf.predict_proba(user_feats[FEATURES])[:,1]
 user_feats["churn_pred"] = clf.predict(user_feats[FEATURES])
 
-# Регресія рекомендацій
+#регресія рекомендацій
 Xr = user_feats[FEATURES]
 yr = user_feats["last_amount"]
 Xr_train, Xr_test, yr_train, yr_test = train_test_split(Xr, yr, test_size=0.3, random_state=42)
@@ -73,14 +73,14 @@ reg = RandomForestRegressor(n_estimators=100, random_state=42)
 reg.fit(Xr_train, yr_train)
 user_feats["next_best_amount"] = reg.predict(user_feats[FEATURES])
 
-# KPI
+#KPI
 avg_churn = user_feats["churn_proba"].mean()
 perc_churn = user_feats["churn_pred"].mean() * 100
 avg_next = user_feats["next_best_amount"].mean()
 
-# ==================================================================
-# Функція створення графіків за замовчуванням з українськими підписами
-# ==================================================================
+
+# функція створення графіків за замовчуванням ----(хай буде)----
+
 def create_default_figures():
     fpr, tpr, _ = roc_curve(yc_test, clf.predict_proba(Xc_test)[:,1])
     roc_fig = go.Figure(go.Scatter(x=fpr, y=tpr, mode='lines', line_color=OLIVE))
@@ -124,9 +124,9 @@ def create_default_figures():
 
 roc_default, fi_default, nb_default, scatter_default, box_default, recency_default, top10_default = create_default_figures()
 
-# ==================================================================
-# Інтерфейс вкладки з українськими підписами та коротким описом графіків
-# ==================================================================
+
+# інтерфейс вкладки
+
 def render_churn_tab():
     min_date = user_feats['last_date'].min().date()
     max_date = user_feats['last_date'].max().date()
@@ -186,7 +186,7 @@ def render_churn_tab():
             style_data_conditional=[{'if':{'row_index':'odd'},'backgroundColor':'#f9f9f9'},{'if':{'filter_query':'{churn_pred} = 1'},'backgroundColor':'#ffe6e6'}]
         ), width=12)),
 
-        # Опис графіків
+        # опис графіків
         dbc.Row(dbc.Col(html.Div([
             html.H5("Опис візуалізацій:"),
             html.Ul([
@@ -202,7 +202,7 @@ def render_churn_tab():
 
     ], fluid=True)
 
-# Callbacks
+# сallbacks відділені від основного коду
 
 def register_churn_callbacks(app: dash.Dash):
     @app.callback(
